@@ -1,0 +1,20 @@
+Include included.conf
+
+Host prod-api prod-api.internal
+    HostName 10.0.1.12
+    User deploy
+
+Host prod-db
+    HostName 10.0.1.13
+
+Host jump-box
+    ProxyJump bastion
+
+Host dev-box
+    HostName dev.local
+
+Host *
+    User ignored
+
+Host *.internal
+    User ignored

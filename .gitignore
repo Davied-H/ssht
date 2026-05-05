@@ -1,0 +1,12 @@
+.DS_Store
+bin/
+dist/
+*.log
+.env
+.env.*
+.omc/
+.omx/
+.claude/
+.idea/
+.vscode/
+.cache/
