@@ -8,9 +8,9 @@ import (
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
 
-	"github.com/dong/ssh-config-tmux-tui/internal/monitor"
-	"github.com/dong/ssh-config-tmux-tui/internal/sshconfig"
-	"github.com/dong/ssh-config-tmux-tui/internal/state"
+	"github.com/dong/ssht/internal/monitor"
+	"github.com/dong/ssht/internal/sshconfig"
+	"github.com/dong/ssht/internal/state"
 )
 
 // Layout constants for the redesigned preview pane. Tied to the 50-column
@@ -76,7 +76,6 @@ func (m Model) previewLines(maxLines, width int) []string {
 	lines := renderPreviewHeader(entry, mstate, width, showMonitor)
 
 	if hist := renderHistorySection(entry, hostState, width); len(hist) > 0 {
-		lines = append(lines, "")
 		lines = append(lines, hist...)
 	}
 
@@ -180,12 +179,12 @@ func renderHistorySection(entry sshconfig.HostEntry, hostState state.HostState, 
 	}
 	out := []string{}
 	if historyValue != "" {
-		out = append(out, barInfoRow("History", historyValue, width))
+		out = append(out, borderedInfoRow("History", historyValue, width))
 	}
 	if source != "" {
-		out = append(out, barInfoRow("Source", source, width))
+		out = append(out, borderedInfoRow("Source", source, width))
 	}
-	return out
+	return borderedBlock(out, width)
 }
 
 // renderHealthSection renders the Health header plus uptime/load/mem/disk/conns
@@ -368,6 +367,49 @@ func barInfoRow(label, value string, width int) string {
 		return prefix
 	}
 	return prefix + truncate(value, available)
+}
+
+func borderedInfoRow(label, value string, width int) string {
+	innerW := width - previewBarIndent - 2
+	if innerW < 1 {
+		return barInfoRow(label, value, width)
+	}
+	labelText := mutedStyle.Render(padRight(label, previewSectionLabelW))
+	prefix := " " + labelText + " "
+	available := innerW - lipgloss.Width(prefix)
+	if available < 1 {
+		return prefix
+	}
+	row := prefix + truncate(value, available)
+	rowW := lipgloss.Width(row)
+	if rowW < innerW {
+		row += strings.Repeat(" ", innerW-rowW)
+	}
+	return row
+}
+
+func borderedBlock(rows []string, width int) []string {
+	boxW := width - previewBarIndent
+	if boxW < 4 {
+		return rows
+	}
+	innerW := boxW - 2
+	indent := strings.Repeat(" ", previewBarIndent)
+	hline := accentStyle.Render(strings.Repeat("─", innerW))
+	top := indent + accentStyle.Render("╭") + hline + accentStyle.Render("╮")
+	bottom := indent + accentStyle.Render("╰") + hline + accentStyle.Render("╯")
+	out := make([]string, 0, len(rows)+2)
+	out = append(out, top)
+	for _, row := range rows {
+		row = truncate(row, innerW)
+		rowW := lipgloss.Width(row)
+		if rowW < innerW {
+			row += strings.Repeat(" ", innerW-rowW)
+		}
+		out = append(out, indent+accentStyle.Render("│")+row+accentStyle.Render("│"))
+	}
+	out = append(out, bottom)
+	return out
 }
 
 // barSectionHeader: "  ┃ Title                  suffix"  (header row that

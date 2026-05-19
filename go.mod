@@ -1,4 +1,4 @@
-module github.com/dong/ssh-config-tmux-tui
+module github.com/dong/ssht
 
 go 1.22
 

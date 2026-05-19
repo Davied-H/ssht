@@ -130,6 +130,33 @@ Host ungrouped
 	}
 }
 
+func TestParseSshtHiddenSkipsHost(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config")
+	if err := os.WriteFile(path, []byte(`
+# ssht: hidden=true
+Host git-only
+    HostName github.example.com
+    User git
+
+# ssht: hidden=false
+Host visible
+    HostName visible.example.com
+`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	entries, warnings, err := ParseFile(path, Options{})
+	if err != nil {
+		t.Fatalf("ParseFile returned error: %v", err)
+	}
+	if len(warnings) != 0 {
+		t.Fatalf("unexpected warnings: %v", warnings)
+	}
+	if len(entries) != 1 || entries[0].Alias != "visible" {
+		t.Fatalf("entries = %#v, want only visible host", entries)
+	}
+}
+
 func TestParseSshpassCommentAddsPasswordToNextHost(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "config")
 	if err := os.WriteFile(path, []byte(`

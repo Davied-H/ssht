@@ -8,8 +8,8 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 
-	"github.com/dong/ssh-config-tmux-tui/internal/monitor"
-	"github.com/dong/ssh-config-tmux-tui/internal/sshconfig"
+	"github.com/dong/ssht/internal/monitor"
+	"github.com/dong/ssht/internal/sshconfig"
 )
 
 // previewModel sets up a Model with one host plus a monitor cache and returns
@@ -87,7 +87,9 @@ func TestPreviewLiveSnapshotCollapsed(t *testing.T) {
 		"● live",
 		"azureuser@4.194.92.132:22",
 		"~/.ssh/estha-en-dify.pem",
-		"┃ Source",
+		"╭",
+		"│ Source",
+		"╰",
 		"┃ Health",
 		"updated",
 		"uptime",
@@ -111,6 +113,9 @@ func TestPreviewLiveSnapshotCollapsed(t *testing.T) {
 		if !strings.Contains(rendered, w) {
 			t.Errorf("expected substring %q in preview:\n%s", w, rendered)
 		}
+	}
+	if strings.Contains(rendered, "~/.ssh/estha-en-dify.pem\n\n  ╭") {
+		t.Errorf("history/source block should not be separated from identity by a blank line:\n%s", rendered)
 	}
 	// Top1 + 1 line, no full top-5 unless expanded
 	if strings.Contains(rendered, "azure-proxy-agent") {

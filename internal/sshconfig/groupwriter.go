@@ -117,9 +117,9 @@ func MoveHostsToGroup(entries []HostEntry, targetName string) (BatchResult, erro
 			return BatchResult{}, fmt.Errorf("%s: %w", path, err)
 		}
 		plans = append(plans, filePlan{
-			path:        path,
-			original:    original,
-			newContent:  newContent,
+			path:         path,
+			original:     original,
+			newContent:   newContent,
 			hostsChanged: hostsChanged,
 		})
 	}
@@ -223,8 +223,9 @@ func planRewriteGroupReference(content, fromName, toName string) (string, int) {
 func rewriteMetadataLine(original string, meta metadata, newGroup string) (string, bool) {
 	indent := original[:len(original)-len(strings.TrimLeft(original, " \t"))]
 	form := HostForm{
-		Group: newGroup,
-		Tags:  append([]string(nil), meta.tags...),
+		Group:  newGroup,
+		Hidden: meta.hidden,
+		Tags:   append([]string(nil), meta.tags...),
 	}
 	rendered := renderMetadata(form)
 	if rendered == "" {
@@ -274,7 +275,7 @@ func planMoveHosts(content string, hostsInFile []HostEntry, target string) (stri
 		}
 		newMeta.group = target
 
-		form := HostForm{Group: newMeta.group, Tags: append([]string(nil), newMeta.tags...)}
+		form := HostForm{Group: newMeta.group, Hidden: newMeta.hidden, Tags: append([]string(nil), newMeta.tags...)}
 		rendered := renderMetadata(form)
 
 		switch {

@@ -1,6 +1,7 @@
 package app
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"os"
@@ -12,10 +13,19 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 
-	"github.com/dong/ssh-config-tmux-tui/internal/sshconfig"
-	"github.com/dong/ssh-config-tmux-tui/internal/state"
-	"github.com/dong/ssh-config-tmux-tui/internal/terminal"
+	"github.com/dong/ssht/internal/monitor"
+	"github.com/dong/ssht/internal/sshconfig"
+	"github.com/dong/ssht/internal/state"
+	"github.com/dong/ssht/internal/terminal"
 )
+
+func typeSearch(model Model, query string) Model {
+	model, _ = model.update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("/")})
+	if query != "" {
+		model, _ = model.update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(query)})
+	}
+	return model
+}
 
 func TestModelFiltersAndReloadsHosts(t *testing.T) {
 	entries := []sshconfig.HostEntry{
@@ -25,8 +35,7 @@ func TestModelFiltersAndReloadsHosts(t *testing.T) {
 	}
 	model := NewModel(Config{Entries: entries})
 
-	model, _ = model.update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("p")})
-	model, _ = model.update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("r")})
+	model = typeSearch(model, "pr")
 
 	if got := model.Filter(); got != "pr" {
 		t.Fatalf("filter = %q, want pr", got)
@@ -41,25 +50,36 @@ func TestModelFiltersAndReloadsHosts(t *testing.T) {
 	}
 }
 
-func TestModelKeepsFilteringWhenActionKeyAppearsAfterText(t *testing.T) {
+func TestSearchModeKeepsActionKeysAsFilterText(t *testing.T) {
 	model := NewModel(Config{Entries: []sshconfig.HostEntry{
 		{Alias: "test-host"},
 		{Alias: "prod-api"},
 	}})
 
-	for _, r := range "test" {
-		model, _ = model.update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{r}})
-	}
+	model = typeSearch(model, "test")
 	if model.mode != modeBrowse || model.Filter() != "test" {
 		t.Fatalf("after test mode=%v filter=%q, want browse/test", model.mode, model.Filter())
 	}
 
 	model = NewModel(Config{Entries: []sshconfig.HostEntry{{Alias: "prod-api"}}})
-	for _, r := range "prod" {
-		model, _ = model.update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{r}})
-	}
+	model = typeSearch(model, "prod")
 	if model.mode != modeBrowse || model.Filter() != "prod" {
 		t.Fatalf("after prod mode=%v filter=%q, want browse/prod", model.mode, model.Filter())
+	}
+}
+
+func TestPlainTypingDoesNotEnterSearchMode(t *testing.T) {
+	model := NewModel(Config{Entries: []sshconfig.HostEntry{
+		{Alias: "prod-api"},
+		{Alias: "dev-db"},
+	}})
+
+	model, _ = model.update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("prod")})
+	if model.Filter() != "" {
+		t.Fatalf("plain typing should not filter, got %q", model.Filter())
+	}
+	if len(model.FilteredEntries()) != 2 {
+		t.Fatalf("plain typing should keep all entries, got %#v", model.FilteredEntries())
 	}
 }
 
@@ -189,7 +209,7 @@ func TestDashboardCountsHostsMatchesAndWarnings(t *testing.T) {
 		Warnings: []sshconfig.Warning{{Path: "config", Message: "warning"}},
 	})
 
-	model, _ = model.update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("prod")})
+	model = typeSearch(model, "prod")
 
 	counts := model.dashboardCounts()
 	if counts.Hosts != 3 || counts.Matched != 2 || counts.Warnings != 1 || counts.Favorites != 0 || counts.Recent != 0 || counts.Selected != 0 {
@@ -241,15 +261,16 @@ func TestModelFiltersByFavoriteAndRecentQueries(t *testing.T) {
 		State: store,
 	})
 
-	model, _ = model.update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("fav: tag:api")})
+	model = typeSearch(model, "fav: tag:api")
 	filtered := model.FilteredEntries()
 	if len(filtered) != 1 || filtered[0].Alias != "prod-api" {
 		t.Fatalf("favorite filtered = %#v, want prod-api", filtered)
 	}
 
 	model.filter = ""
+	model.searchActive = false
 	model.applyFilter()
-	model, _ = model.update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("recent: prod")})
+	model = typeSearch(model, "recent: prod")
 	filtered = model.FilteredEntries()
 	if got := aliases(filtered); strings.Join(got, ",") != "prod-api,prod-db" {
 		t.Fatalf("recent filtered aliases = %v, want prod-api,prod-db", got)
@@ -405,7 +426,7 @@ func TestModelFiltersBySelectedGroupAndTagQuery(t *testing.T) {
 	if got := model.selectedGroup(); got != "prod" {
 		t.Fatalf("selected group = %q, want prod", got)
 	}
-	model, _ = model.update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("tag:api")})
+	model = typeSearch(model, "tag:api")
 
 	filtered := model.FilteredEntries()
 	if len(filtered) != 1 || filtered[0].Alias != "prod-api" {
@@ -668,6 +689,156 @@ func TestMovingMarkedHostsBuildsConfirmPanel(t *testing.T) {
 	}
 }
 
+func TestGroupPickerMovesCurrentHostWhenNoneMarked(t *testing.T) {
+	model := NewModel(Config{
+		Entries: []sshconfig.HostEntry{
+			{Alias: "a", Group: "prod", SourceFile: "/tmp/x", SourceLine: 1},
+			{Alias: "b", Group: "prod", SourceFile: "/tmp/x", SourceLine: 5},
+			{Alias: "c", Group: "dev", SourceFile: "/tmp/x", SourceLine: 9},
+		},
+	})
+	model.cursor = 1
+
+	model, _ = model.update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("g")})
+	if model.mode != modeGroupPicker {
+		t.Fatalf("mode = %d, want modeGroupPicker", model.mode)
+	}
+	if len(model.groupPicker.movingHosts) != 1 || model.groupPicker.movingHosts[0].Alias != "b" {
+		t.Fatalf("movingHosts = %#v, want current host b", model.groupPicker.movingHosts)
+	}
+	model, _ = model.update(tea.KeyMsg{Type: tea.KeyEnter})
+	if model.mode != modeConfirm {
+		t.Fatalf("mode = %d, want modeConfirm", model.mode)
+	}
+	if model.pending.operation != operationGroupMoveHosts {
+		t.Fatalf("operation = %d, want operationGroupMoveHosts", model.pending.operation)
+	}
+	if model.pending.groupTo != "dev" {
+		t.Fatalf("groupTo = %q, want first existing group dev", model.pending.groupTo)
+	}
+	if len(model.pending.movingHosts) != 1 || model.pending.movingHosts[0].Alias != "b" {
+		t.Fatalf("pending movingHosts = %#v, want host b", model.pending.movingHosts)
+	}
+}
+
+func TestGroupPickerMovesMarkedHostsToSelectedGroup(t *testing.T) {
+	model := NewModel(Config{
+		Entries: []sshconfig.HostEntry{
+			{Alias: "a", Group: "prod", SourceFile: "/tmp/x", SourceLine: 1},
+			{Alias: "b", Group: "prod", SourceFile: "/tmp/x", SourceLine: 5},
+			{Alias: "c", Group: "dev", SourceFile: "/tmp/x", SourceLine: 9},
+		},
+	})
+	model.selected = map[string]bool{"a": true, "b": true}
+
+	model, _ = model.update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("g")})
+	model, _ = model.update(tea.KeyMsg{Type: tea.KeyDown})
+	model, _ = model.update(tea.KeyMsg{Type: tea.KeyEnter})
+
+	if model.mode != modeConfirm {
+		t.Fatalf("mode = %d, want modeConfirm", model.mode)
+	}
+	if model.pending.groupTo != "prod" {
+		t.Fatalf("groupTo = %q, want prod", model.pending.groupTo)
+	}
+	if len(model.pending.movingHosts) != 2 {
+		t.Fatalf("movingHosts count = %d, want 2", len(model.pending.movingHosts))
+	}
+}
+
+func TestGroupPickerMovesToNewGroupName(t *testing.T) {
+	model := NewModel(Config{
+		Entries: []sshconfig.HostEntry{
+			{Alias: "a", Group: "prod", SourceFile: "/tmp/x", SourceLine: 1},
+		},
+	})
+
+	model, _ = model.update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("g")})
+	for _, r := range "lab" {
+		model, _ = model.update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{r}})
+	}
+	model, _ = model.update(tea.KeyMsg{Type: tea.KeyEnter})
+
+	if model.mode != modeConfirm {
+		t.Fatalf("mode = %d, want modeConfirm", model.mode)
+	}
+	if model.pending.groupTo != "lab" {
+		t.Fatalf("groupTo = %q, want lab", model.pending.groupTo)
+	}
+	if len(model.state.EmptyGroups) != 0 {
+		t.Fatalf("EmptyGroups = %v, want unchanged", model.state.EmptyGroups)
+	}
+}
+
+func TestGroupPickerRejectsInvalidGroupName(t *testing.T) {
+	model := NewModel(Config{
+		Entries: []sshconfig.HostEntry{
+			{Alias: "a", Group: "prod", SourceFile: "/tmp/x", SourceLine: 1},
+		},
+	})
+
+	model, _ = model.update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("g")})
+	for _, r := range "bad group" {
+		model, _ = model.update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{r}})
+	}
+	model, _ = model.update(tea.KeyMsg{Type: tea.KeyEnter})
+
+	if model.mode != modeGroupPicker {
+		t.Fatalf("mode = %d, want modeGroupPicker", model.mode)
+	}
+	if model.pending.operation == operationGroupMoveHosts {
+		t.Fatalf("pending operation should not be move on invalid input")
+	}
+	if model.status == "" {
+		t.Fatalf("status empty, want validation error")
+	}
+}
+
+func TestGroupPickerEscCancelsWithoutPending(t *testing.T) {
+	model := NewModel(Config{
+		Entries: []sshconfig.HostEntry{
+			{Alias: "a", Group: "prod", SourceFile: "/tmp/x", SourceLine: 1},
+		},
+	})
+
+	model, _ = model.update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("g")})
+	model, _ = model.update(tea.KeyMsg{Type: tea.KeyEsc})
+
+	if model.mode != modeBrowse {
+		t.Fatalf("mode = %d, want modeBrowse", model.mode)
+	}
+	if model.pending.operation != operationAdd {
+		t.Fatalf("pending changed: %#v", model.pending)
+	}
+	if len(model.groupPicker.movingHosts) != 0 {
+		t.Fatalf("groupPicker still populated: %#v", model.groupPicker)
+	}
+}
+
+func TestGroupPickerMoveToEmptyGroupDropsPlaceholderAfterWrite(t *testing.T) {
+	store := state.NewStore()
+	store.EmptyGroups = []string{"lab"}
+	model := NewModel(Config{
+		Entries: []sshconfig.HostEntry{
+			{Alias: "a", Group: "prod", SourceFile: "/tmp/x", SourceLine: 1},
+		},
+		State: store,
+	})
+
+	model, _ = model.update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("g")})
+	for _, r := range "lab" {
+		model, _ = model.update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{r}})
+	}
+	model, _ = model.update(tea.KeyMsg{Type: tea.KeyEnter})
+	if model.pending.groupTo != "lab" {
+		t.Fatalf("groupTo = %q, want lab", model.pending.groupTo)
+	}
+	model, _ = model.update(writeConfigMsg{op: operationGroupMoveHosts, groupTo: "lab"})
+	if isEmptyGroup(model.state.EmptyGroups, "lab") {
+		t.Fatalf("EmptyGroups still contains lab: %v", model.state.EmptyGroups)
+	}
+}
+
 func TestShiftGroupOrderInjectsAndSwaps(t *testing.T) {
 	model := NewModel(Config{
 		Entries: []sshconfig.HostEntry{
@@ -749,7 +920,7 @@ func TestBrowseViewFitsWindowHeight(t *testing.T) {
 	if got, want := renderedLineCount(view), 18; got > want {
 		t.Fatalf("view rendered %d lines, want at most %d:\n%s", got, want, view)
 	}
-	if !strings.Contains(view, "[/] group") {
+	if !strings.Contains(view, "←/→ group") {
 		t.Fatalf("footer missing from constrained view:\n%s", view)
 	}
 	for _, line := range strings.Split(view, "\n") {
@@ -855,6 +1026,140 @@ Host prod
 	}
 	if strings.Contains(readAppFile(t, path), "Host prod") {
 		t.Fatalf("host still present:\n%s", readAppFile(t, path))
+	}
+}
+
+func TestSlashEntersSearchModeAndClearsPreviousFilter(t *testing.T) {
+	model := NewModel(Config{Entries: []sshconfig.HostEntry{
+		{Alias: "prod-api"},
+		{Alias: "dev-db"},
+	}})
+	model = typeSearch(model, "prod")
+	if model.Filter() != "prod" {
+		t.Fatalf("filter = %q, want prod", model.Filter())
+	}
+	model, _ = model.update(tea.KeyMsg{Type: tea.KeyEnter})
+
+	model, _ = model.update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("/")})
+	if model.Filter() != "" {
+		t.Fatalf("slash should clear filter, got %q", model.Filter())
+	}
+	if got := len(model.FilteredEntries()); got != 2 {
+		t.Fatalf("filtered count = %d, want 2", got)
+	}
+}
+
+func TestModelFuzzyFiltersHostAliases(t *testing.T) {
+	model := NewModel(Config{Entries: []sshconfig.HostEntry{
+		{Alias: "prod-api"},
+		{Alias: "dev-db"},
+	}})
+
+	model = typeSearch(model, "pa")
+	filtered := model.FilteredEntries()
+	if len(filtered) != 1 || filtered[0].Alias != "prod-api" {
+		t.Fatalf("fuzzy filtered = %#v, want prod-api", filtered)
+	}
+}
+
+func TestBatchConnectUsesAllMarkedHostsAcrossFilters(t *testing.T) {
+	runner := &countingRunner{}
+	model := NewModel(Config{
+		Entries: []sshconfig.HostEntry{
+			{Alias: "prod-a"},
+			{Alias: "dev-b"},
+		},
+		Manager: terminal.Manager{
+			Runner:     runner,
+			Preference: "terminal",
+		},
+	})
+
+	model, _ = model.update(tea.KeyMsg{Type: tea.KeySpace})
+	model, _ = model.update(tea.KeyMsg{Type: tea.KeyDown})
+	model, _ = model.update(tea.KeyMsg{Type: tea.KeySpace})
+	model = typeSearch(model, "prod")
+	counts := model.dashboardCounts()
+	if counts.Selected != 2 || counts.VisibleSelected != 1 {
+		t.Fatalf("counts = %#v, want selected=2 visible=1", counts)
+	}
+	model, _ = model.update(tea.KeyMsg{Type: tea.KeyEnter})
+
+	model, cmd := model.update(tea.KeyMsg{Type: tea.KeyEnter})
+	if cmd == nil {
+		t.Fatal("expected batch connect command")
+	}
+	model, _ = model.update(cmd())
+	if runner.runCalls != 2 {
+		t.Fatalf("run calls = %d, want both marked hosts", runner.runCalls)
+	}
+}
+
+func TestWarningsPanelOpensAndCloses(t *testing.T) {
+	model := NewModel(Config{
+		Entries:  []sshconfig.HostEntry{{Alias: "prod"}},
+		Warnings: []sshconfig.Warning{{Path: "config", Line: 3, Message: "bad include"}},
+	})
+
+	model, _ = model.update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("W")})
+	if model.mode != modeWarnings {
+		t.Fatalf("mode = %v, want warnings", model.mode)
+	}
+	if view := stripANSI(model.View()); !strings.Contains(view, "bad include") {
+		t.Fatalf("warnings view missing warning:\n%s", view)
+	}
+	model, _ = model.update(tea.KeyMsg{Type: tea.KeyEsc})
+	if model.mode != modeBrowse {
+		t.Fatalf("mode after esc = %v, want browse", model.mode)
+	}
+}
+
+func TestFormCursorEditsInsideFieldAndClears(t *testing.T) {
+	model := NewModel(Config{})
+	model, _ = model.update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("A")})
+	for _, r := range "prod" {
+		model, _ = model.update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{r}})
+	}
+	model, _ = model.update(tea.KeyMsg{Type: tea.KeyLeft})
+	model, _ = model.update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("-")})
+	if got := model.form.values.Alias; got != "pro-d" {
+		t.Fatalf("alias = %q, want pro-d", got)
+	}
+	model, _ = model.update(tea.KeyMsg{Type: tea.KeyCtrlU})
+	if got := model.form.values.Alias; got != "" {
+		t.Fatalf("alias after ctrl+u = %q, want empty", got)
+	}
+	if model.form.cursor != 0 {
+		t.Fatalf("cursor = %d, want 0", model.form.cursor)
+	}
+}
+
+func TestManualMonitorRefreshOpensPanelAndProbes(t *testing.T) {
+	cache := monitor.NewCache(time.Minute, time.Second)
+	probeCalls := 0
+	probe := func(ctx context.Context, target monitor.ProbeTarget) (*monitor.Snapshot, error) {
+		probeCalls++
+		return &monitor.Snapshot{Alias: target.Alias, Uptime: "up 1 day"}, nil
+	}
+	model := NewModel(Config{
+		Entries: []sshconfig.HostEntry{{Alias: "prod"}},
+		Monitor: cache,
+		Probe:   probe,
+	})
+
+	model, cmd := model.update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("R")})
+	if cmd == nil {
+		t.Fatal("expected monitor probe command")
+	}
+	if !model.monitorVisible {
+		t.Fatal("manual refresh should enable monitor panel")
+	}
+	model, _ = model.update(cmd())
+	if probeCalls != 1 {
+		t.Fatalf("probe calls = %d, want 1", probeCalls)
+	}
+	if _, ok := cache.Get("prod"); !ok {
+		t.Fatal("expected snapshot in cache")
 	}
 }
 

@@ -85,6 +85,31 @@ func TestOpenSSHUsesITermWindowWithoutTmux(t *testing.T) {
 	}
 }
 
+func TestOpenSSHExplicitITermWindowDoesNotSplitInsideITerm(t *testing.T) {
+	runner := &recordingRunner{}
+	manager := Manager{
+		Runner:     runner,
+		Preference: "iterm",
+		OpenMode:   OpenModeWindow,
+		Env:        mapEnv("ITERM_SESSION_ID", "w0t0p0"),
+	}
+
+	if err := manager.Connect("prod-api"); err != nil {
+		t.Fatalf("Connect returned error: %v", err)
+	}
+
+	got := strings.Join(runner.calls[1], "\n")
+	if strings.Contains(got, "split vertically") {
+		t.Fatalf("explicit window should not split:\n%s", got)
+	}
+	if !strings.Contains(got, "create window with default profile") {
+		t.Fatalf("explicit window did not create a window:\n%s", got)
+	}
+	if got, want := manager.OpenModeName(), "window"; got != want {
+		t.Fatalf("open mode name = %q, want %q", got, want)
+	}
+}
+
 func TestOpenSSHUsesITermTabWhenWindowExists(t *testing.T) {
 	runner := &recordingRunner{}
 	manager := Manager{Runner: runner, Preference: "iterm", OpenMode: OpenModeTab}
@@ -105,6 +130,95 @@ func TestOpenSSHUsesITermTabWhenWindowExists(t *testing.T) {
 	}
 	if !reflect.DeepEqual(runner.calls, want) {
 		t.Fatalf("calls = %#v, want %#v", runner.calls, want)
+	}
+}
+
+func TestOpenSSHUsesITermSplitForAutoModeInsideITerm(t *testing.T) {
+	runner := &recordingRunner{}
+	manager := Manager{
+		Runner:     runner,
+		Preference: "iterm",
+		OpenMode:   OpenModeAuto,
+		Env:        mapEnv("TERM_PROGRAM", "iTerm.app"),
+	}
+
+	if err := manager.Connect("prod-api"); err != nil {
+		t.Fatalf("Connect returned error: %v", err)
+	}
+
+	want := [][]string{
+		{"output", "osascript", "-e", `id of application "iTerm"`},
+		{"output", "osascript", "-e", `tell application "iTerm" to count windows`},
+		{"run", "osascript",
+			"-e", `tell application "iTerm"`,
+			"-e", "activate",
+			"-e", `tell current session of current window`,
+			"-e", `set newSession to (split vertically with default profile)`,
+			"-e", `tell newSession to write text "ssh 'prod-api'"`,
+			"-e", "end tell",
+			"-e", "end tell"},
+	}
+	if !reflect.DeepEqual(runner.calls, want) {
+		t.Fatalf("calls = %#v, want %#v", runner.calls, want)
+	}
+	if got, want := manager.OpenModeName(), "split"; got != want {
+		t.Fatalf("open mode name = %q, want %q", got, want)
+	}
+}
+
+func TestOpenSSHUsesITermTabForAutoModeOutsideITerm(t *testing.T) {
+	runner := &recordingRunner{}
+	manager := Manager{
+		Runner:     runner,
+		Preference: "iterm",
+		OpenMode:   OpenModeAuto,
+		Env:        mapEnv("TERM_PROGRAM", "Apple_Terminal"),
+	}
+
+	if err := manager.Connect("prod-api"); err != nil {
+		t.Fatalf("Connect returned error: %v", err)
+	}
+
+	want := [][]string{
+		{"output", "osascript", "-e", `id of application "iTerm"`},
+		{"output", "osascript", "-e", `tell application "iTerm" to count windows`},
+		{"run", "osascript",
+			"-e", `tell application "iTerm"`,
+			"-e", "activate",
+			"-e", `tell current window to create tab with default profile`,
+			"-e", `tell current session of current window to write text "ssh 'prod-api'"`,
+			"-e", "end tell"},
+	}
+	if !reflect.DeepEqual(runner.calls, want) {
+		t.Fatalf("calls = %#v, want %#v", runner.calls, want)
+	}
+	if got, want := manager.OpenModeName(), "tab"; got != want {
+		t.Fatalf("open mode name = %q, want %q", got, want)
+	}
+}
+
+func TestOpenSSHExplicitITermTabDoesNotSplitInsideITerm(t *testing.T) {
+	runner := &recordingRunner{}
+	manager := Manager{
+		Runner:     runner,
+		Preference: "iterm",
+		OpenMode:   OpenModeTab,
+		Env:        mapEnv("ITERM_SESSION_ID", "w0t0p0"),
+	}
+
+	if err := manager.Connect("prod-api"); err != nil {
+		t.Fatalf("Connect returned error: %v", err)
+	}
+
+	got := strings.Join(runner.calls[2], "\n")
+	if strings.Contains(got, "split vertically") {
+		t.Fatalf("explicit tab should not split:\n%s", got)
+	}
+	if !strings.Contains(got, "create tab with default profile") {
+		t.Fatalf("explicit tab did not create a tab:\n%s", got)
+	}
+	if got, want := manager.OpenModeName(), "tab"; got != want {
+		t.Fatalf("open mode name = %q, want %q", got, want)
 	}
 }
 
@@ -385,6 +499,16 @@ func TestUnavailableBackendsReturnSupportedList(t *testing.T) {
 		if !strings.Contains(got, want) {
 			t.Fatalf("error %q does not contain %q", got, want)
 		}
+	}
+}
+
+func mapEnv(values ...string) EnvLookup {
+	env := map[string]string{}
+	for i := 0; i+1 < len(values); i += 2 {
+		env[values[i]] = values[i+1]
+	}
+	return func(name string) string {
+		return env[name]
 	}
 }
 

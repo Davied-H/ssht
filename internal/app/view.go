@@ -8,7 +8,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
 
-	"github.com/dong/ssh-config-tmux-tui/internal/sshconfig"
+	"github.com/dong/ssht/internal/sshconfig"
 )
 
 var (
@@ -20,10 +20,12 @@ var (
 	liveStyle     = lipgloss.NewStyle().Foreground(lipgloss.Color("42"))
 	warnStyle     = lipgloss.NewStyle().Foreground(lipgloss.Color("214"))
 	accentStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("75"))
+	rowFocusStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("212")).Bold(true)
 )
 
 const (
-	footerHint          = "/ filter · Tab focus · [/] group · ↵ connect · v expand · M monitor · e edit · A add · ? help"
+	footerPrimary       = "↵ connect · / search · g move · ←/→ group · Space mark · e edit · A add"
+	footerSecondary     = "Tab focus · ←/→ group · P preview · v expand · M monitor · r reload · ? help"
 	previewMinWidth     = 26
 	previewBaseWidth    = 50
 	previewMaxWidth     = 80
@@ -48,36 +50,197 @@ func (m Model) View() string {
 	if m.mode == modeGroupInline {
 		return m.fitToWindow(m.groupInlineView())
 	}
+	if m.mode == modeGroupPicker {
+		return m.fitToWindow(m.groupPickerView())
+	}
+	if m.mode == modeWarnings {
+		return m.fitToWindow(m.warningsView())
+	}
 
 	return m.browseView()
+}
+
+func panelTitle(title string) string {
+	return accentStyle.Render("▎ ") + titleStyle.Render(title)
+}
+
+func sectionLabel(label string) string {
+	return dimStyle.Render(strings.ToUpper(label))
+}
+
+func statusChip(label string, value int, style lipgloss.Style) string {
+	return dimStyle.Render(label+" ") + style.Render(fmt.Sprintf("%d", value))
+}
+
+func keyHints(hints ...string) string {
+	styled := make([]string, 0, len(hints))
+	for _, hint := range hints {
+		styled = append(styled, mutedStyle.Render(hint))
+	}
+	return strings.Join(styled, dimStyle.Render(" · "))
+}
+
+func focusRow(row string) string {
+	return rowFocusStyle.Render(row)
+}
+
+func infoRow(label, value string) string {
+	return "  " + mutedStyle.Render(padRight(label, 10)) + "  " + value
+}
+
+func inputRow(label, value string) string {
+	return "  " + mutedStyle.Render(padRight(label, 10)) + "  " + value
+}
+
+func renderCursorValue(value string, cursor int) string {
+	runes := []rune(value)
+	if cursor < 0 {
+		cursor = 0
+	}
+	if cursor > len(runes) {
+		cursor = len(runes)
+	}
+	return string(runes[:cursor]) + selectedStyle.Render("▏") + string(runes[cursor:])
+}
+
+func statusLine(status string) string {
+	status = strings.TrimSpace(status)
+	if status == "" {
+		return ""
+	}
+	style := errorStyle
+	lower := strings.ToLower(status)
+	switch {
+	case strings.Contains(lower, "saved"), strings.Contains(lower, "opened"), strings.Contains(lower, "refreshing"), lower == "monitor on", lower == "monitor off", lower == "preview on", lower == "preview off":
+		style = liveStyle
+	case strings.Contains(lower, "warning"), strings.Contains(lower, "stale"):
+		style = warnStyle
+	}
+	return style.Render("status ") + mutedStyle.Render(status)
+}
+
+func (m Model) footerLines() []string {
+	primary := footerPrimary
+	secondary := footerSecondary
+	if m.searchActive {
+		primary = "type search · Enter done · Esc done · Ctrl+U clear"
+		secondary = ""
+	} else if m.focus == focusSidebar {
+		primary = "j/k move · Enter list · a create · r rename · m merge · d delete"
+		secondary = "/ search · P preview · M move marked here · J/K reorder · Esc list · ? help"
+	} else if len(m.selected) > 0 {
+		primary = "↵ connect marked · Space unmark · g move marked · / search · W warnings"
+	} else if m.filter != "" {
+		primary = "↵ connect · / search · g group · Space mark · e edit"
+	} else if m.monitor != nil && m.monitorVisible {
+		secondary = "R refresh monitor · P preview · v expand · Tab focus · r reload · W warnings · ? help"
+	}
+	lines := []string{keyHints(strings.Split(primary, " · ")...)}
+	if secondary != "" && (m.width <= 0 || m.width >= 96) {
+		lines = append(lines, keyHints(strings.Split(secondary, " · ")...))
+	}
+	return lines
 }
 
 func (m Model) groupInlineView() string {
 	var b strings.Builder
 	switch m.groupInline.action {
 	case groupInlineCreate:
-		b.WriteString(titleStyle.Render("Create group"))
+		b.WriteString(panelTitle("Create group"))
 	case groupInlineRename:
-		b.WriteString(titleStyle.Render("Rename group " + m.groupInline.target))
+		b.WriteString(panelTitle("Rename group"))
+		b.WriteString("\n")
+		b.WriteString(infoRow("Current", m.groupInline.target))
 	default:
-		b.WriteString(titleStyle.Render("Group"))
+		b.WriteString(panelTitle("Group"))
 	}
-	b.WriteString("\n\nName: ")
-	b.WriteString(m.groupInline.buffer)
+	b.WriteString("\n\n")
+	b.WriteString(inputRow("Name", m.groupInline.buffer))
 	b.WriteString(selectedStyle.Render("▏"))
 	b.WriteString("\n\n")
-	b.WriteString(mutedStyle.Render("Enter confirm | Esc cancel"))
+	b.WriteString(keyHints("Enter confirm", "Esc cancel"))
 	if m.status != "" {
 		b.WriteString("\n")
-		b.WriteString(errorStyle.Render(m.status))
+		b.WriteString(statusLine(m.status))
 	}
 	return b.String()
 }
 
-func (m Model) browseView() string {
-	footerLines := []string{mutedStyle.Render(footerHint)}
+func (m Model) groupPickerView() string {
+	var b strings.Builder
+	candidates := m.groupPickerCandidates()
+	buffer := strings.TrimSpace(m.groupPicker.buffer)
+
+	b.WriteString(panelTitle("Move to group"))
+	b.WriteString("\n\n")
+	moving := fmt.Sprintf("%d host(s)", len(m.groupPicker.movingHosts))
+	if len(m.groupPicker.movingHosts) == 1 {
+		moving += " · " + m.groupPicker.movingHosts[0].Alias
+	}
+	b.WriteString(infoRow("Moving", moving))
+	b.WriteString("\n")
+	b.WriteString(inputRow("Group", m.groupPicker.buffer))
+	b.WriteString(selectedStyle.Render("▏"))
+	b.WriteString("\n\n")
+
+	if len(candidates) > 0 {
+		b.WriteString(sectionLabel("Groups"))
+		b.WriteByte('\n')
+		for i, name := range candidates {
+			if i >= 8 {
+				b.WriteString(mutedStyle.Render(fmt.Sprintf("  … %d more", len(candidates)-i)))
+				b.WriteByte('\n')
+				break
+			}
+			row := "  " + padRight(name, 20)
+			if i == m.groupPicker.cursor {
+				row = focusRow("› " + padRight(name, 20))
+			}
+			b.WriteString(row)
+			b.WriteByte('\n')
+		}
+	} else {
+		b.WriteString(mutedStyle.Render("No existing groups match."))
+		b.WriteByte('\n')
+	}
+	if buffer != "" && !m.isKnownGroup(buffer) {
+		b.WriteString("\n")
+		b.WriteString(accentStyle.Render("New group: " + buffer))
+		b.WriteByte('\n')
+	}
+	b.WriteString("\n")
+	b.WriteString(keyHints("Enter review", "↑/↓ choose", "type new/filter", "Esc cancel"))
 	if m.status != "" {
-		footerLines = append(footerLines, errorStyle.Render(m.status))
+		b.WriteString("\n")
+		b.WriteString(statusLine(m.status))
+	}
+	return b.String()
+}
+
+func (m Model) warningsView() string {
+	var b strings.Builder
+	b.WriteString(panelTitle("Warnings"))
+	b.WriteString("\n\n")
+	if len(m.warnings) == 0 {
+		b.WriteString(mutedStyle.Render("No parser warnings."))
+	} else {
+		for i, warning := range m.warnings {
+			label := fmt.Sprintf("%d.", i+1)
+			b.WriteString(warnStyle.Render(padRight(label, 3)))
+			b.WriteString(" ")
+			b.WriteString(warning.Error())
+			b.WriteByte('\n')
+		}
+	}
+	b.WriteString("\n")
+	b.WriteString(keyHints("Esc close", "Enter close", "W close", "q quit"))
+	return b.String()
+}
+
+func (m Model) browseView() string {
+	footerLines := m.footerLines()
+	if m.status != "" {
+		footerLines = append(footerLines, statusLine(m.status))
 	}
 
 	contentHeight := maxViewHeight
@@ -86,6 +249,9 @@ func (m Model) browseView() string {
 	}
 	lines := m.browseLines(contentHeight)
 	lines = fitLines(lines, contentHeight)
+	if m.height > 0 && len(lines) < contentHeight {
+		lines = append(lines, make([]string, contentHeight-len(lines))...)
+	}
 	lines = append(lines, footerLines...)
 	return strings.Join(truncateLines(lines, m.width), "\n")
 }
@@ -134,53 +300,52 @@ func (m Model) formView() string {
 	if m.form.operation == operationEdit {
 		title = "Edit Host"
 	}
-	b.WriteString(titleStyle.Render(title))
+	b.WriteString(panelTitle(title))
 	b.WriteString("\n\n")
 	values := formFieldValues(m.form.values)
 	for i, label := range formFields() {
-		line := fmt.Sprintf("  %-12s %s", label+":", values[i])
+		value := values[i]
 		if i == m.form.field {
-			line = selectedStyle.Render("> " + strings.TrimSpace(line))
+			value = renderCursorValue(value, m.form.cursor)
+		}
+		line := inputRow(label, value)
+		if i == m.form.field {
+			line = focusRow("› " + strings.TrimSpace(line))
 		}
 		b.WriteString(line)
 		b.WriteByte('\n')
 	}
 	b.WriteString("\n")
-	b.WriteString(mutedStyle.Render("Up/Down move | type edit | Backspace delete | Ctrl+S review save | Esc cancel"))
+	b.WriteString(keyHints("↑/↓ move", "←/→ cursor", "Ctrl+U clear", "Ctrl+S review", "Esc cancel"))
 	if m.status != "" {
 		b.WriteString("\n")
-		b.WriteString(errorStyle.Render(m.status))
+		b.WriteString(statusLine(m.status))
 	}
 	return b.String()
 }
 
 func (m Model) confirmView() string {
 	var b strings.Builder
-	b.WriteString(titleStyle.Render("Confirm"))
+	b.WriteString(panelTitle("Confirm"))
 	b.WriteString("\n\n")
-	b.WriteString("Operation: ")
-	b.WriteString(operationLabel(m.pending.operation))
+	b.WriteString(infoRow("Operation", operationLabel(m.pending.operation)))
 	b.WriteByte('\n')
 
 	switch m.pending.operation {
 	case operationGroupRename, operationGroupMerge:
-		b.WriteString("From: ")
-		b.WriteString(m.pending.groupFrom)
+		b.WriteString(infoRow("From", m.pending.groupFrom))
 		b.WriteByte('\n')
-		b.WriteString("To:   ")
-		b.WriteString(m.pending.groupTo)
+		b.WriteString(infoRow("To", m.pending.groupTo))
 		b.WriteByte('\n')
 	case operationGroupDelete:
-		b.WriteString("Group: ")
-		b.WriteString(m.pending.groupFrom)
+		b.WriteString(infoRow("Group", warnStyle.Render(m.pending.groupFrom)))
 		b.WriteByte('\n')
 		b.WriteString(mutedStyle.Render("(member hosts will move to ungrouped)"))
 		b.WriteByte('\n')
 	case operationGroupMoveHosts:
-		b.WriteString("Target group: ")
-		b.WriteString(m.pending.groupTo)
+		b.WriteString(infoRow("Target", m.pending.groupTo))
 		b.WriteByte('\n')
-		b.WriteString(fmt.Sprintf("Moving %d host(s):", len(m.pending.movingHosts)))
+		b.WriteString(sectionLabel(fmt.Sprintf("Moving %d host(s)", len(m.pending.movingHosts))))
 		b.WriteByte('\n')
 		for _, host := range m.pending.movingHosts {
 			b.WriteString("  - ")
@@ -188,66 +353,78 @@ func (m Model) confirmView() string {
 			b.WriteByte('\n')
 		}
 	default:
-		b.WriteString("Target: ")
-		b.WriteString(m.pending.target)
+		b.WriteString(infoRow("Target", m.pending.target))
 		b.WriteByte('\n')
 		if m.pending.entry.Alias != "" {
-			b.WriteString("Current: ")
-			b.WriteString(m.pending.entry.Alias)
+			b.WriteString(infoRow("Current", m.pending.entry.Alias))
 			b.WriteByte('\n')
 		}
 		if m.pending.operation != operationDelete {
-			b.WriteString("Alias: ")
-			b.WriteString(m.pending.values.Alias)
+			b.WriteString(infoRow("Alias", m.pending.values.Alias))
 			b.WriteByte('\n')
 		}
 	}
 
 	b.WriteString("\n")
-	b.WriteString(mutedStyle.Render("s confirm | Esc cancel"))
+	b.WriteString(keyHints("s confirm", "Esc cancel"))
 	if m.status != "" {
 		b.WriteString("\n")
-		b.WriteString(errorStyle.Render(m.status))
+		b.WriteString(statusLine(m.status))
 	}
 	return b.String()
 }
 
 func (m Model) topStatusLine() string {
 	counts := m.dashboardCounts()
-	var b strings.Builder
-	b.WriteString(titleStyle.Render("ssht"))
-	b.WriteString(mutedStyle.Render(fmt.Sprintf("  Hosts %d", counts.Hosts)))
+	parts := []string{
+		titleStyle.Render("ssht"),
+		dimStyle.Render("group ") + accentStyle.Render(m.selectedGroup()),
+		statusChip("Hosts", counts.Hosts, mutedStyle),
+	}
 	if counts.Matched != counts.Hosts {
-		b.WriteString(mutedStyle.Render(fmt.Sprintf("  Matched %d", counts.Matched)))
+		parts = append(parts, statusChip("Matched", counts.Matched, accentStyle))
 	}
 	if counts.Favorites > 0 {
-		b.WriteString(mutedStyle.Render(fmt.Sprintf("  ★ %d", counts.Favorites)))
+		parts = append(parts, statusChip("Fav", counts.Favorites, mutedStyle))
 	}
 	if counts.Recent > 0 {
-		b.WriteString(mutedStyle.Render(fmt.Sprintf("  ⏱ %d", counts.Recent)))
+		parts = append(parts, statusChip("Recent", counts.Recent, mutedStyle))
 	}
 	if counts.Selected > 0 {
-		b.WriteString("  ")
-		b.WriteString(selectedStyle.Render(fmt.Sprintf("✓ %d", counts.Selected)))
+		value := fmt.Sprintf("%d", counts.Selected)
+		if counts.VisibleSelected != counts.Selected {
+			value = fmt.Sprintf("%d/%d visible", counts.VisibleSelected, counts.Selected)
+		}
+		parts = append(parts, dimStyle.Render("Marked ")+selectedStyle.Render(value))
 	}
 	if counts.Warnings > 0 {
-		b.WriteString("  ")
-		b.WriteString(errorStyle.Render(fmt.Sprintf("⚠ %d", counts.Warnings)))
+		parts = append(parts, statusChip("⚠", counts.Warnings, errorStyle))
 	}
-	return b.String()
+	return strings.Join(parts, dimStyle.Render("  "))
 }
 
 func (m Model) filterLine() string {
-	prompt := mutedStyle.Render("/ ")
-	if m.filter == "" {
-		return prompt + mutedStyle.Render("filter…")
+	if m.searchActive {
+		prompt := selectedStyle.Render("SEARCH ")
+		value := m.filter
+		if value == "" {
+			value = mutedStyle.Render("tag:<name> · fav: · recent:")
+		}
+		return accentStyle.Render("▎ ") + prompt + value + selectedStyle.Render("▏") + dimStyle.Render("  Enter/Esc done")
 	}
-	return prompt + m.filter + selectedStyle.Render("▏")
+	prompt := accentStyle.Render("/ search ")
+	if m.filter == "" {
+		return prompt + mutedStyle.Render("shortcuts active · tag:<name> · fav: · recent:")
+	}
+	return prompt + m.filter + dimStyle.Render("  matched")
 }
 
 func (m Model) splitColumns() (left, right int) {
 	if m.width <= 0 {
 		return 0, 0
+	}
+	if !m.previewVisible {
+		return m.width - 2, 0
 	}
 	available := m.width - 4 // 2 indent + 2 gap
 	if available < listMinWidth+previewMinWidth || m.width < twoColumnMinWidth {
@@ -286,6 +463,15 @@ func (m Model) splitThreeColumns() (sidebarW, listW, previewW int) {
 		return 0, 0, 0
 	}
 	sidebarW = m.computeSidebarWidth()
+	if !m.previewVisible {
+		if sidebarW > 0 && m.width >= threeColumnMinWidth {
+			listW = m.width - sidebarW - 2
+			if listW >= listMinWidth {
+				return sidebarW, listW, 0
+			}
+		}
+		return 0, m.width - 2, 0
+	}
 	if sidebarW > 0 && m.width >= threeColumnMinWidth {
 		available := m.width - 6 // 2 indent + 2 gap (sidebar|list) + 2 gap (list|preview)
 		remaining := available - sidebarW
@@ -325,7 +511,7 @@ func (m Model) computeSidebarWidth() int {
 	if len(items) == 0 {
 		return 0
 	}
-	longest := 0
+	longest := lipgloss.Width("groups")
 	for _, item := range items {
 		candidate := lipgloss.Width(item.Name) + 1 + countDigits(item.Count) + 2 // "▸ name 12"
 		if candidate > longest {
@@ -359,11 +545,40 @@ func (m Model) sidebarLines(maxLines, width int) []string {
 		return nil
 	}
 	selected := m.selectedGroup()
-	lines := make([]string, 0, len(items))
-	for _, item := range items {
+	lines := make([]string, 0, len(items)+1)
+	title := sectionLabel("groups")
+	if m.focus == focusSidebar {
+		title = accentStyle.Render("groups") + dimStyle.Render(" · focus")
+	}
+	lines = append(lines, truncate(title, width))
+
+	rowBudget := maxLines - len(lines)
+	if rowBudget <= 0 {
+		return fitLines(lines, maxLines)
+	}
+	start := 0
+	if len(items) > rowBudget {
+		for i, item := range items {
+			if item.Name == selected {
+				start = i - rowBudget/2
+				break
+			}
+		}
+		if start < 0 {
+			start = 0
+		}
+		if maxStart := len(items) - rowBudget; start > maxStart {
+			start = maxStart
+		}
+	}
+	end := start + rowBudget
+	if end > len(items) {
+		end = len(items)
+	}
+	for _, item := range items[start:end] {
 		marker := "  "
 		if item.Name == selected {
-			marker = "▸ "
+			marker = "› "
 		}
 		countStr := fmt.Sprintf("%d", item.Count)
 		nameWidth := width - 2 - 1 - lipgloss.Width(countStr)
@@ -432,7 +647,14 @@ func (m Model) listLines(maxLines, width int) []string {
 	if maxLines <= 0 {
 		return nil
 	}
-	rowBudget := maxLines
+	lines := []string{}
+	if width >= 28 {
+		lines = append(lines, m.listHeader(width))
+	}
+	rowBudget := maxLines - len(lines)
+	if rowBudget <= 0 {
+		return fitLines(lines, maxLines)
+	}
 	hasHidden := len(m.filtered) > rowBudget
 	if hasHidden && rowBudget > 1 {
 		rowBudget--
@@ -452,7 +674,6 @@ func (m Model) listLines(maxLines, width int) []string {
 		end = len(m.filtered)
 	}
 
-	lines := make([]string, 0, end-start+1)
 	for i := start; i < end; i++ {
 		lines = append(lines, m.formatListRow(i, width))
 	}
@@ -463,24 +684,39 @@ func (m Model) listLines(maxLines, width int) []string {
 	return lines
 }
 
+func (m Model) listHeader(width int) string {
+	if width <= 0 {
+		return ""
+	}
+	header := "  " + dimStyle.Render("state") + " " + sectionLabel("host")
+	if len(m.filtered) > 0 {
+		pos := fmt.Sprintf("%d/%d", m.cursor+1, len(m.filtered))
+		header = layoutLeftRight(header, dimStyle.Render(pos), width)
+	}
+	if lipgloss.Width(header) > width {
+		return truncate(header, width)
+	}
+	return header
+}
+
 func (m Model) formatListRow(i, width int) string {
 	entry := m.filtered[i]
-	markers := m.entryMarkers(entry)
+	markers := m.entryMarkerCell(entry)
 	connection := connectionString(entry)
 
 	prefix := "  "
 	if i == m.cursor {
-		prefix = "> "
+		prefix = "› "
 	}
 
 	aliasReserve := 24
 	connectionReserve := 0
 	if width > 0 {
-		// total = len(prefix=2) + len(markers=3) + 1 + alias + 1 + connection
-		base := 2 + 3 + 1 + 1 // prefix + markers + 2 spaces
+		// total = prefix + status cell + space + alias + space + connection.
+		base := 2 + 5 + 1 + 1
 		fluid := width - base
 		if fluid < 8 {
-			aliasReserve = fluid
+			aliasReserve = max(fluid, 1)
 			connectionReserve = 0
 		} else {
 			aliasReserve = fluid * 5 / 9
@@ -491,16 +727,20 @@ func (m Model) formatListRow(i, width int) string {
 		}
 	}
 
-	alias := padRight(truncate(entry.Alias, aliasReserve), aliasReserve)
+	aliasText := truncate(entry.Alias, aliasReserve)
+	alias := padRight(aliasText, aliasReserve)
 	connStr := ""
 	if connectionReserve > 0 && connection != "" {
 		connStr = " " + mutedStyle.Render(truncate(connection, connectionReserve))
 	}
 
-	row := prefix + markers + " " + alias + connStr
+	renderedAlias := titleStyle.Render(alias)
+	if i != m.cursor {
+		renderedAlias = titleStyle.Render(highlightSearchTerm(alias, m.filter))
+	}
+	row := prefix + markers + " " + renderedAlias + connStr
 	if i == m.cursor {
-		// re-apply highlight only to the alias (markers and conn stay subtle)
-		row = selectedStyle.Render("> "+markers+" "+alias) + connStr
+		row = focusRow(prefix+markers+" "+highlightSearchTerm(alias, m.filter)) + connStr
 	}
 	return row
 }
@@ -512,6 +752,50 @@ func formatField(label, value string, width int) string {
 		return mutedStyle.Render(labelText)
 	}
 	return mutedStyle.Render(labelText) + "  " + truncate(value, valueWidth)
+}
+
+func highlightSearchTerm(value, query string) string {
+	terms := textSearchTerms(query)
+	if len(terms) == 0 {
+		return value
+	}
+	lower := strings.ToLower(value)
+	for _, term := range terms {
+		idx := strings.Index(lower, term)
+		if idx < 0 {
+			continue
+		}
+		runes := []rune(value)
+		termRunes := []rune(term)
+		runeIdx := len([]rune(lower[:idx]))
+		end := runeIdx + len(termRunes)
+		if end > len(runes) {
+			end = len(runes)
+		}
+		return string(runes[:runeIdx]) + accentStyle.Render(string(runes[runeIdx:end])) + string(runes[end:])
+	}
+	if fuzzyHighlight := highlightFuzzyRunes(value, terms[0]); fuzzyHighlight != "" {
+		return fuzzyHighlight
+	}
+	return value
+}
+
+func highlightFuzzyRunes(value, term string) string {
+	if term == "" || !fuzzyContains(value, term) {
+		return ""
+	}
+	termRunes := []rune(strings.ToLower(term))
+	j := 0
+	var b strings.Builder
+	for _, r := range value {
+		if j < len(termRunes) && []rune(strings.ToLower(string(r)))[0] == termRunes[j] {
+			b.WriteString(accentStyle.Render(string(r)))
+			j++
+			continue
+		}
+		b.WriteRune(r)
+	}
+	return b.String()
 }
 
 func joinColumns(left, right []string, leftWidth int) []string {
@@ -588,14 +872,19 @@ func (m Model) helpView() string {
 	return strings.Join([]string{
 		titleStyle.Render("ssht help"),
 		"",
-		"Type to filter hosts.",
+		"/      Enter search mode. Typing filters only while search mode is active.",
 		"Enter  Open the selected host using the configured terminal mode.",
-		"Space  Mark or unmark a host for batch connect.",
+		"Space  Mark or unmark a host for batch connect across filters/groups.",
 		"f      Toggle favorite for the selected host.",
+		"g      Move current/marked host(s) to a group (recommended).",
+		"P      Toggle the right preview pane.",
 		"v      Toggle expanded preview (full top processes, raw config, all tags).",
 		"M      Toggle the SSH monitoring panel (Health + Top CPU).",
+		"R      Refresh the selected host's monitor snapshot now.",
+		"W      Show parser warnings.",
+		"PgUp/PgDn/Home/End  Move quickly through the host list.",
 		"Tab    Toggle focus between host list and group sidebar.",
-		"[/]    Move between groups (works in either focus).",
+		"←/→    Move between groups (also [ and ]).",
 		"e      Edit the selected host.",
 		"A      Add a new host.",
 		"d      Delete the selected host.",
@@ -610,18 +899,19 @@ func (m Model) helpView() string {
 		"r      Rename the current group (rewrites SSH config comments).",
 		"m      Merge the current group into another group.",
 		"d      Delete the current group (its hosts move to ungrouped).",
-		"M      Move marked hosts (Space) into the current group.",
+		"M      Move marked hosts (Space) into the current group (advanced; g is faster from the host list).",
 		"J/K    Shift the current group down/up in the saved order.",
 		"Esc    Return focus to host list.",
 		"",
 		titleStyle.Render("Form Group field"),
 		"Tab    Cycle through known group names while in the Group field.",
+		"Ctrl+U Clear the current field; Ctrl+A/Ctrl+E move to field start/end.",
 		"",
-		mutedStyle.Render("Use tag:<name>, fav:, and recent: in search. Connection command: ssh <alias>; OpenSSH resolves the full config."),
+		mutedStyle.Render("Use tag:<name>, fav:, and recent: in search mode. Connection command: ssh <alias>; OpenSSH resolves the full config."),
 	}, "\n")
 }
 
-func (m Model) entryMarkers(entry sshconfig.HostEntry) string {
+func (m Model) entryMarkerCell(entry sshconfig.HostEntry) string {
 	markers := []rune{' ', ' ', ' '}
 	if m.selected[entry.Alias] {
 		markers[0] = '✓'
@@ -633,7 +923,21 @@ func (m Model) entryMarkers(entry sshconfig.HostEntry) string {
 	if hostState.LastConnectedAt != "" {
 		markers[2] = '●'
 	}
-	return string(markers)
+	rendered := make([]string, 0, len(markers))
+	for i, marker := range markers {
+		cell := string(marker)
+		switch {
+		case marker == ' ':
+			rendered = append(rendered, dimStyle.Render("·"))
+		case i == 0:
+			rendered = append(rendered, selectedStyle.Render(cell))
+		case i == 1:
+			rendered = append(rendered, warnStyle.Render(cell))
+		default:
+			rendered = append(rendered, liveStyle.Render(cell))
+		}
+	}
+	return strings.Join(rendered, "")
 }
 
 func formFieldValues(form sshconfig.HostForm) []string {

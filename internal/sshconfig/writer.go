@@ -11,6 +11,7 @@ import (
 type HostForm struct {
 	Alias        string
 	Group        string
+	Hidden       bool
 	HostName     string
 	User         string
 	Port         string
@@ -247,6 +248,9 @@ func renderMetadata(form HostForm) string {
 	var parts []string
 	if strings.TrimSpace(form.Group) != "" {
 		parts = append(parts, "group="+strings.TrimSpace(form.Group))
+	}
+	if form.Hidden {
+		parts = append(parts, "hidden=true")
 	}
 	if len(form.Tags) > 0 {
 		parts = append(parts, "tags="+strings.Join(cleanTags(form.Tags), ","))

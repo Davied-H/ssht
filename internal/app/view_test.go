@@ -5,9 +5,10 @@ import (
 	"testing"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 
-	"github.com/dong/ssh-config-tmux-tui/internal/sshconfig"
-	"github.com/dong/ssh-config-tmux-tui/internal/state"
+	"github.com/dong/ssht/internal/sshconfig"
+	"github.com/dong/ssht/internal/state"
 )
 
 func newWideModel(t *testing.T, entries []sshconfig.HostEntry, store state.Store) Model {
@@ -29,8 +30,8 @@ func TestSidebarRenderListsAllGroupsAndCurrentSelection(t *testing.T) {
 			t.Fatalf("sidebar missing %q\n%s", name, view)
 		}
 	}
-	if !strings.Contains(view, "▸") {
-		t.Fatalf("sidebar missing selection marker ▸\n%s", view)
+	if !strings.Contains(view, "›") {
+		t.Fatalf("sidebar missing selection marker ›\n%s", view)
 	}
 }
 
@@ -39,7 +40,7 @@ func TestSidebarHidesOnNarrowTerminal(t *testing.T) {
 	model := NewModel(Config{Entries: entries})
 	model, _ = model.update(tea.WindowSizeMsg{Width: 60, Height: 20})
 	view := model.View()
-	if strings.Contains(view, "▸") {
+	if strings.Contains(view, "GROUPS") {
 		t.Fatalf("sidebar should be hidden on narrow terminal\n%s", view)
 	}
 }
@@ -61,7 +62,8 @@ func TestSidebarShowsEmptyGroupsWithZeroCount(t *testing.T) {
 
 func containsZeroCount(view, group string) bool {
 	for _, line := range strings.Split(view, "\n") {
-		if strings.Contains(line, group) && strings.HasSuffix(strings.TrimRight(line, " "), "0") {
+		plain := stripANSI(line)
+		if strings.Contains(plain, group+" 0") {
 			return true
 		}
 	}
@@ -109,5 +111,108 @@ func TestSplitThreeColumnsAllocatesSidebarOnWideTerminal(t *testing.T) {
 	}
 	if list < listMinWidth || preview < previewMinWidth {
 		t.Fatalf("widths = sidebar %d list %d preview %d", sidebar, list, preview)
+	}
+}
+
+func TestPreviewPaneCanBeCollapsedWithShortcut(t *testing.T) {
+	entries := []sshconfig.HostEntry{
+		{Alias: "a", Group: "prod", SourceFile: "/tmp/config", SourceLine: 1},
+		{Alias: "b", Group: "dev", SourceFile: "/tmp/config", SourceLine: 2},
+	}
+	model := NewModel(Config{Entries: entries})
+	model, _ = model.update(tea.WindowSizeMsg{Width: 140, Height: 24})
+	_, _, preview := model.splitThreeColumns()
+	if preview == 0 {
+		t.Fatalf("preview should be visible before toggle")
+	}
+
+	model, _ = model.update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("P")})
+	sidebar, list, preview := model.splitThreeColumns()
+	if preview != 0 {
+		t.Fatalf("preview width = %d, want 0", preview)
+	}
+	if sidebar == 0 || list < listMinWidth {
+		t.Fatalf("collapsed layout should keep sidebar/list, got sidebar=%d list=%d preview=%d", sidebar, list, preview)
+	}
+	if !strings.Contains(model.View(), "preview off") {
+		t.Fatalf("view should show preview off status:\n%s", model.View())
+	}
+}
+
+func TestPreviewPaneCanBeCollapsedFromSidebarFocus(t *testing.T) {
+	entries := []sshconfig.HostEntry{
+		{Alias: "a", Group: "prod"},
+		{Alias: "b", Group: "dev"},
+	}
+	model := NewModel(Config{Entries: entries})
+	model, _ = model.update(tea.WindowSizeMsg{Width: 140, Height: 24})
+	model, _ = model.update(tea.KeyMsg{Type: tea.KeyTab})
+	model, _ = model.update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("P")})
+
+	_, _, preview := model.splitThreeColumns()
+	if preview != 0 {
+		t.Fatalf("preview width = %d, want 0", preview)
+	}
+}
+
+func TestBrowseViewRendersProfessionalStructureOnWideTerminal(t *testing.T) {
+	entries := []sshconfig.HostEntry{
+		{Alias: "prod-api", Group: "prod", HostName: "10.0.1.12", User: "deploy"},
+		{Alias: "dev-db", Group: "dev", HostName: "10.0.2.10", User: "root"},
+	}
+	model := newWideModel(t, entries, state.NewStore())
+
+	view := model.View()
+	for _, want := range []string{"GROUPS", "state HOST", "/ search shortcuts active", "▎", "›"} {
+		if !strings.Contains(view, want) {
+			t.Fatalf("wide view missing %q:\n%s", want, view)
+		}
+	}
+}
+
+func TestBrowseViewPinsFooterToBottom(t *testing.T) {
+	entries := []sshconfig.HostEntry{
+		{Alias: "prod-api", Group: "prod", HostName: "10.0.1.12", User: "deploy"},
+	}
+	model := NewModel(Config{Entries: entries})
+	model, _ = model.update(tea.WindowSizeMsg{Width: 120, Height: 24})
+
+	lines := strings.Split(model.View(), "\n")
+	if len(lines) != 24 {
+		t.Fatalf("view height = %d, want 24\n%s", len(lines), model.View())
+	}
+	if !strings.Contains(stripANSI(lines[22]), "connect") {
+		t.Fatalf("primary footer should be on second-to-last row, got %q\n%s", stripANSI(lines[22]), model.View())
+	}
+	if !strings.Contains(stripANSI(lines[23]), "Tab focus") {
+		t.Fatalf("secondary footer should be on last row, got %q\n%s", stripANSI(lines[23]), model.View())
+	}
+}
+
+func TestBrowseViewWidthIsRespectedAcrossBreakpoints(t *testing.T) {
+	entries := []sshconfig.HostEntry{
+		{
+			Alias:        "prod-api-node-with-a-very-long-name",
+			Group:        "production-east-with-long-name",
+			HostName:     "10.0.1.12",
+			User:         "deploy-user-with-a-long-name",
+			IdentityFile: "~/.ssh/a-very-long-identity-file-name.pem",
+			SourceFile:   "/Users/example/.ssh/config",
+			SourceLine:   42,
+		},
+		{Alias: "dev-db", Group: "dev", HostName: "10.0.2.10", User: "root"},
+	}
+	for _, width := range []int{72, 80, 96, 120, 140} {
+		model := NewModel(Config{Entries: entries})
+		model, _ = model.update(tea.WindowSizeMsg{Width: width, Height: 18})
+		view := model.View()
+		if !strings.Contains(view, "↵ connect") {
+			t.Fatalf("width=%d footer missing:\n%s", width, view)
+		}
+		for _, line := range strings.Split(view, "\n") {
+			if got := lipgloss.Width(line); got > width {
+				t.Fatalf("width=%d line width = %d: %q\n%s", width, got, line, view)
+			}
+		}
 	}
 }

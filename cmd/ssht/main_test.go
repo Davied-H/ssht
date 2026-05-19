@@ -1,6 +1,11 @@
 package main
 
-import "testing"
+import (
+	"strings"
+	"testing"
+
+	"github.com/dong/ssht/internal/sshconfig"
+)
 
 func TestParseOptionsDefaultsTerminalToAuto(t *testing.T) {
 	t.Setenv("SSHT_TERMINAL", "")
@@ -13,8 +18,8 @@ func TestParseOptionsDefaultsTerminalToAuto(t *testing.T) {
 	if options.Terminal != "auto" {
 		t.Fatalf("terminal = %q, want auto", options.Terminal)
 	}
-	if options.OpenMode != "tab" {
-		t.Fatalf("open mode = %q, want tab", options.OpenMode)
+	if options.OpenMode != "auto" {
+		t.Fatalf("open mode = %q, want auto", options.OpenMode)
 	}
 }
 
@@ -56,14 +61,14 @@ func TestParseOptionsRejectsInvalidTerminal(t *testing.T) {
 
 func TestParseOptionsUsesOpenModeEnvironment(t *testing.T) {
 	t.Setenv("SSHT_TERMINAL", "")
-	t.Setenv("SSHT_OPEN_MODE", "tab")
+	t.Setenv("SSHT_OPEN_MODE", "auto")
 
 	options, err := parseOptions([]string{})
 	if err != nil {
 		t.Fatalf("parseOptions returned error: %v", err)
 	}
-	if options.OpenMode != "tab" {
-		t.Fatalf("open mode = %q, want tab", options.OpenMode)
+	if options.OpenMode != "auto" {
+		t.Fatalf("open mode = %q, want auto", options.OpenMode)
 	}
 }
 
@@ -87,5 +92,44 @@ func TestParseOptionsRejectsInvalidOpenMode(t *testing.T) {
 	_, err := parseOptions([]string{"--open-mode", "pane"})
 	if err == nil {
 		t.Fatal("expected invalid open mode error")
+	}
+	if got := err.Error(); !strings.Contains(got, "auto, window, tab") {
+		t.Fatalf("error = %q, want supported modes", got)
+	}
+}
+
+func TestParseOptionsAcceptsConnectHost(t *testing.T) {
+	t.Setenv("SSHT_TERMINAL", "")
+	t.Setenv("SSHT_OPEN_MODE", "")
+
+	options, err := parseOptions([]string{"--connect", "prod-api-01"})
+	if err != nil {
+		t.Fatalf("parseOptions returned error: %v", err)
+	}
+	if options.ConnectHost != "prod-api-01" {
+		t.Fatalf("connect host = %q, want prod-api-01", options.ConnectHost)
+	}
+}
+
+func TestFindHostByAlias(t *testing.T) {
+	entries := []sshconfig.HostEntry{
+		{Alias: "dev"},
+		{Alias: "prod"},
+	}
+
+	entry, ok := findHost(entries, "prod")
+	if !ok {
+		t.Fatal("expected host to be found")
+	}
+	if entry.Alias != "prod" {
+		t.Fatalf("alias = %q, want prod", entry.Alias)
+	}
+}
+
+func TestFindHostRejectsEmptyAlias(t *testing.T) {
+	entries := []sshconfig.HostEntry{{Alias: "prod"}}
+
+	if _, ok := findHost(entries, ""); ok {
+		t.Fatal("expected empty alias to be rejected")
 	}
 }

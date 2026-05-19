@@ -45,6 +45,25 @@ Host existing
 	assertBackupExists(t, path)
 }
 
+func TestAddHostWritesHiddenMetadata(t *testing.T) {
+	path := writeTempConfig(t, "")
+
+	err := AddHost(path, HostForm{
+		Alias:    "git-only",
+		Hidden:   true,
+		HostName: "github.example.com",
+		User:     "git",
+	})
+	if err != nil {
+		t.Fatalf("AddHost returned error: %v", err)
+	}
+
+	content := readFile(t, path)
+	if !strings.Contains(content, "# ssht: hidden=true") {
+		t.Fatalf("hidden metadata missing:\n%s", content)
+	}
+}
+
 func TestEditHostUpdatesSingleAliasBlockAndPreservesOtherContent(t *testing.T) {
 	path := writeTempConfig(t, `
 # before

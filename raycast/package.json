@@ -1,0 +1,125 @@
+{
+  "name": "ssht",
+  "title": "Ssht",
+  "description": "Search and connect OpenSSH config hosts through ssht.",
+  "icon": "icon.png",
+  "author": "dong",
+  "license": "MIT",
+  "platforms": [
+    "macOS"
+  ],
+  "categories": [
+    "Developer Tools",
+    "Productivity"
+  ],
+  "commands": [
+    {
+      "name": "search-hosts",
+      "title": "Search SSH Hosts",
+      "description": "Search OpenSSH config hosts and connect through ssht.",
+      "mode": "view"
+    }
+  ],
+  "preferences": [
+    {
+      "name": "sshtPath",
+      "title": "ssht Path",
+      "description": "Path to the ssht executable. Use an absolute path if Raycast cannot find ssht on PATH.",
+      "type": "textfield",
+      "required": false,
+      "default": "ssht",
+      "placeholder": "ssht"
+    },
+    {
+      "name": "configPath",
+      "title": "SSH Config Path",
+      "description": "Optional path to an OpenSSH config file. Leave empty to use ~/.ssh/config.",
+      "type": "textfield",
+      "required": false,
+      "placeholder": "~/.ssh/config"
+    },
+    {
+      "name": "noInclude",
+      "title": "Disable Include Parsing",
+      "description": "Ignore Include directives while listing hosts.",
+      "type": "checkbox",
+      "label": "Ignore Include directives",
+      "required": false,
+      "default": false
+    },
+    {
+      "name": "terminal",
+      "title": "Terminal",
+      "description": "Terminal backend used by ssht when opening a connection.",
+      "type": "dropdown",
+      "required": true,
+      "default": "auto",
+      "data": [
+        {
+          "title": "Auto",
+          "value": "auto"
+        },
+        {
+          "title": "iTerm2",
+          "value": "iterm"
+        },
+        {
+          "title": "Terminal.app",
+          "value": "terminal"
+        },
+        {
+          "title": "WezTerm",
+          "value": "wezterm"
+        },
+        {
+          "title": "kitty",
+          "value": "kitty"
+        },
+        {
+          "title": "Alacritty",
+          "value": "alacritty"
+        },
+        {
+          "title": "Ghostty",
+          "value": "ghostty"
+        }
+      ]
+    },
+    {
+      "name": "openMode",
+      "title": "Open Mode",
+      "description": "Whether ssht should use automatic iTerm split detection, a new tab, or a new window.",
+      "type": "dropdown",
+      "required": true,
+      "default": "auto",
+      "data": [
+        {
+          "title": "Auto",
+          "value": "auto"
+        },
+        {
+          "title": "Tab",
+          "value": "tab"
+        },
+        {
+          "title": "Window",
+          "value": "window"
+        }
+      ]
+    }
+  ],
+  "scripts": {
+    "build": "ray build -e dist",
+    "dev": "ray develop",
+    "lint": "ray lint",
+    "fix-lint": "ray lint --fix"
+  },
+  "dependencies": {
+    "@raycast/api": "^1.95.0"
+  },
+  "devDependencies": {
+    "@raycast/eslint-config": "^2.0.4",
+    "@types/node": "^22.0.0",
+    "typescript": "^5.5.0"
+  }
+}

@@ -2,6 +2,7 @@ package terminal
 
 import (
 	"fmt"
+	"os"
 	"os/exec"
 	"strconv"
 	"strings"
@@ -26,7 +27,9 @@ type Manager struct {
 	Runner     Runner
 	Preference string
 	OpenMode   OpenMode
+	Env        EnvLookup
 	selected   *Backend
+	lastMode   OpenMode
 }
 
 type Target struct {
@@ -37,20 +40,24 @@ type Target struct {
 type OpenMode string
 
 const (
+	OpenModeAuto   OpenMode = "auto"
 	OpenModeWindow OpenMode = "window"
 	OpenModeTab    OpenMode = "tab"
+	OpenModeSplit  OpenMode = "split"
 )
+
+type EnvLookup func(string) string
 
 type Backend struct {
 	ID       string
 	Name     string
 	Check    func(Runner) error
 	Supports func(OpenMode) bool
-	Connect  func(Runner, OpenMode, Target) error
+	Connect  func(Runner, OpenMode, Target, EnvLookup) (OpenMode, error)
 }
 
 func New() Manager {
-	return Manager{Runner: ExecRunner{}, OpenMode: OpenModeTab}
+	return Manager{Runner: ExecRunner{}, OpenMode: OpenModeAuto}
 }
 
 func (m *Manager) CheckAvailable() error {
@@ -77,7 +84,12 @@ func (m *Manager) Connect(target any) error {
 	if err != nil {
 		return err
 	}
-	return backend.Connect(m.runner(), m.openMode(), normalized)
+	actualMode, err := backend.Connect(m.runner(), m.openMode(), normalized, m.env())
+	if err != nil {
+		return err
+	}
+	m.lastMode = actualMode
+	return nil
 }
 
 func normalizeTarget(value any) (Target, error) {
@@ -92,6 +104,9 @@ func normalizeTarget(value any) (Target, error) {
 }
 
 func (m *Manager) OpenModeName() string {
+	if m.lastMode != "" {
+		return string(m.lastMode)
+	}
 	return string(m.openMode())
 }
 
@@ -101,7 +116,7 @@ func (m *Manager) selectBackend() (*Backend, error) {
 	}
 	mode := m.openMode()
 	if !ValidOpenMode(mode) {
-		return nil, fmt.Errorf("unsupported open mode %q; supported modes: window, tab", mode)
+		return nil, fmt.Errorf("unsupported open mode %q; supported modes: auto, window, tab", mode)
 	}
 	backends := defaultBackends()
 	if preference := normalizePreference(m.Preference); preference != "" && preference != "auto" {
@@ -139,11 +154,26 @@ func defaultBackends() []Backend {
 			Name:     "iTerm2",
 			Check:    appCheck("iTerm"),
 			Supports: supportsWindowAndTab,
-			Connect: func(runner Runner, mode OpenMode, target Target) error {
+			Connect: func(runner Runner, mode OpenMode, target Target, env EnvLookup) (OpenMode, error) {
 				command := sshCommand(target)
-				if mode == OpenModeTab {
-					if !hasAppWindow(runner, "iTerm") {
-						return runner.Run("osascript",
+				hasWindow := false
+				if mode == OpenModeAuto || mode == OpenModeTab {
+					hasWindow = hasAppWindow(runner, "iTerm")
+				}
+				if mode == OpenModeAuto && isITermSession(env) && hasWindow {
+					return OpenModeSplit, runner.Run("osascript",
+						"-e", `tell application "iTerm"`,
+						"-e", "activate",
+						"-e", `tell current session of current window`,
+						"-e", `set newSession to (split vertically with default profile)`,
+						"-e", `tell newSession to write text `+appleScriptString(command),
+						"-e", "end tell",
+						"-e", "end tell",
+					)
+				}
+				if mode == OpenModeAuto || mode == OpenModeTab {
+					if !hasWindow {
+						return OpenModeWindow, runner.Run("osascript",
 							"-e", `tell application "iTerm"`,
 							"-e", "activate",
 							"-e", `create window with default profile`,
@@ -151,7 +181,7 @@ func defaultBackends() []Backend {
 							"-e", "end tell",
 						)
 					}
-					return runner.Run("osascript",
+					return OpenModeTab, runner.Run("osascript",
 						"-e", `tell application "iTerm"`,
 						"-e", "activate",
 						"-e", `tell current window to create tab with default profile`,
@@ -159,7 +189,7 @@ func defaultBackends() []Backend {
 						"-e", "end tell",
 					)
 				}
-				return runner.Run("osascript",
+				return OpenModeWindow, runner.Run("osascript",
 					"-e", `tell application "iTerm"`,
 					"-e", "activate",
 					"-e", `create window with default profile`,
@@ -173,17 +203,17 @@ func defaultBackends() []Backend {
 			Name:     "Terminal.app",
 			Check:    appCheck("Terminal"),
 			Supports: supportsWindowAndTab,
-			Connect: func(runner Runner, mode OpenMode, target Target) error {
+			Connect: func(runner Runner, mode OpenMode, target Target, env EnvLookup) (OpenMode, error) {
 				command := sshCommand(target)
-				if mode == OpenModeTab && hasAppWindow(runner, "Terminal") {
-					return runner.Run("osascript",
+				if (mode == OpenModeAuto || mode == OpenModeTab) && hasAppWindow(runner, "Terminal") {
+					return OpenModeTab, runner.Run("osascript",
 						"-e", `tell application "Terminal"`,
 						"-e", "activate",
 						"-e", `do script `+appleScriptString(command)+` in front window`,
 						"-e", "end tell",
 					)
 				}
-				return runner.Run("osascript",
+				return OpenModeWindow, runner.Run("osascript",
 					"-e", `tell application "Terminal"`,
 					"-e", "activate",
 					"-e", `do script `+appleScriptString(command),
@@ -206,7 +236,7 @@ func appCheck(name string) func(Runner) error {
 }
 
 func supportsWindowAndTab(mode OpenMode) bool {
-	return mode == OpenModeWindow || mode == OpenModeTab
+	return mode == OpenModeAuto || mode == OpenModeWindow || mode == OpenModeTab
 }
 
 func windowOnlyCLIBackend(id, name, command string, args ...string) Backend {
@@ -220,10 +250,10 @@ func windowOnlyCLIBackend(id, name, command string, args ...string) Backend {
 		Supports: func(mode OpenMode) bool {
 			return mode == OpenModeWindow
 		},
-		Connect: func(runner Runner, mode OpenMode, target Target) error {
+		Connect: func(runner Runner, mode OpenMode, target Target, env EnvLookup) (OpenMode, error) {
 			runArgs := append([]string{}, args...)
 			runArgs = append(runArgs, sshCommandArgs(target)...)
-			return runner.Run(command, runArgs...)
+			return OpenModeWindow, runner.Run(command, runArgs...)
 		},
 	}
 }
@@ -237,15 +267,17 @@ func tabbedCLIBackend(id, name, command string, windowArgs, tabArgs []string) Ba
 			return err
 		},
 		Supports: func(mode OpenMode) bool {
-			return mode == OpenModeWindow || mode == OpenModeTab
+			return mode == OpenModeAuto || mode == OpenModeWindow || mode == OpenModeTab
 		},
-		Connect: func(runner Runner, mode OpenMode, target Target) error {
+		Connect: func(runner Runner, mode OpenMode, target Target, env EnvLookup) (OpenMode, error) {
 			runArgs := append([]string{}, windowArgs...)
-			if mode == OpenModeTab {
+			actualMode := OpenModeWindow
+			if mode == OpenModeAuto || mode == OpenModeTab {
 				runArgs = append([]string{}, tabArgs...)
+				actualMode = OpenModeTab
 			}
 			runArgs = append(runArgs, sshCommandArgs(target)...)
-			return runner.Run(command, runArgs...)
+			return actualMode, runner.Run(command, runArgs...)
 		},
 	}
 }
@@ -259,14 +291,14 @@ func ghosttyBackend() Backend {
 			return err
 		},
 		Supports: func(mode OpenMode) bool {
-			return mode == OpenModeWindow || mode == OpenModeTab
+			return mode == OpenModeAuto || mode == OpenModeWindow || mode == OpenModeTab
 		},
-		Connect: func(runner Runner, mode OpenMode, target Target) error {
-			if mode == OpenModeTab {
+		Connect: func(runner Runner, mode OpenMode, target Target, env EnvLookup) (OpenMode, error) {
+			if mode == OpenModeAuto || mode == OpenModeTab {
 				return connectGhosttyTab(runner, target)
 			}
 			runArgs := append([]string{"-e"}, sshCommandArgs(target)...)
-			return runner.Run("ghostty", runArgs...)
+			return OpenModeWindow, runner.Run("ghostty", runArgs...)
 		},
 	}
 }
@@ -285,7 +317,7 @@ func normalizePreference(preference string) string {
 }
 
 func ValidOpenMode(mode OpenMode) bool {
-	return mode == OpenModeWindow || mode == OpenModeTab
+	return mode == OpenModeAuto || mode == OpenModeWindow || mode == OpenModeTab
 }
 
 func supportedBackends(backends []Backend) string {
@@ -304,9 +336,16 @@ func (m *Manager) runner() Runner {
 	return ExecRunner{}
 }
 
+func (m *Manager) env() EnvLookup {
+	if m.Env != nil {
+		return m.Env
+	}
+	return os.Getenv
+}
+
 func (m *Manager) openMode() OpenMode {
 	if m.OpenMode == "" {
-		return OpenModeTab
+		return OpenModeAuto
 	}
 	return OpenMode(strings.ToLower(strings.TrimSpace(string(m.OpenMode))))
 }
@@ -327,13 +366,15 @@ func hasAppWindow(runner Runner, appName string) bool {
 	return err == nil && count > 0
 }
 
-func connectGhosttyTab(runner Runner, target Target) error {
+func connectGhosttyTab(runner Runner, target Target) (OpenMode, error) {
 	command := sshCommand(target)
 	operation := `new window with configuration cfg`
+	actualMode := OpenModeWindow
 	if hasAppWindow(runner, "Ghostty") {
 		operation = `tell front window to new tab with configuration cfg`
+		actualMode = OpenModeTab
 	}
-	return runner.Run("osascript",
+	return actualMode, runner.Run("osascript",
 		"-e", `tell application "Ghostty"`,
 		"-e", "activate",
 		"-e", `set cfg to default configuration`,
@@ -341,6 +382,13 @@ func connectGhosttyTab(runner Runner, target Target) error {
 		"-e", operation,
 		"-e", "end tell",
 	)
+}
+
+func isITermSession(env EnvLookup) bool {
+	if env == nil {
+		return false
+	}
+	return env("TERM_PROGRAM") == "iTerm.app" || env("ITERM_SESSION_ID") != ""
 }
 
 func sshCommand(target Target) string {

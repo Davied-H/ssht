@@ -9,51 +9,54 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 
-	"github.com/dong/ssh-config-tmux-tui/internal/monitor"
-	"github.com/dong/ssh-config-tmux-tui/internal/sshconfig"
-	"github.com/dong/ssh-config-tmux-tui/internal/state"
-	"github.com/dong/ssh-config-tmux-tui/internal/terminal"
+	"github.com/dong/ssht/internal/monitor"
+	"github.com/dong/ssht/internal/sshconfig"
+	"github.com/dong/ssht/internal/state"
+	"github.com/dong/ssht/internal/terminal"
 )
 
 type Config struct {
-	ConfigPath string
-	Entries    []sshconfig.HostEntry
-	Warnings   []sshconfig.Warning
-	Manager    terminal.Manager
-	Load       func() ([]sshconfig.HostEntry, []sshconfig.Warning, error)
-	StatePath  string
-	State      state.Store
-	Now        func() time.Time
+	ConfigPath     string
+	Entries        []sshconfig.HostEntry
+	Warnings       []sshconfig.Warning
+	Manager        terminal.Manager
+	Load           func() ([]sshconfig.HostEntry, []sshconfig.Warning, error)
+	StatePath      string
+	State          state.Store
+	Now            func() time.Time
 	Monitor        *monitor.Cache
 	Probe          monitor.ProbeFunc
 	MonitorVisible bool
 }
 
 type Model struct {
-	configPath  string
-	entries     []sshconfig.HostEntry
-	filtered    []sshconfig.HostEntry
-	warnings    []sshconfig.Warning
-	filter      string
-	cursor      int
-	groupCursor int
-	status      string
-	showHelp    bool
-	mode        appMode
-	form        formState
-	pending     pendingOperation
-	manager     terminal.Manager
-	load        func() ([]sshconfig.HostEntry, []sshconfig.Warning, error)
-	statePath   string
-	state       state.Store
-	selected    map[string]bool
-	now         func() time.Time
-	width       int
-	height      int
-	focus       focusKind
-	groupInline groupInlineState
+	configPath   string
+	entries      []sshconfig.HostEntry
+	filtered     []sshconfig.HostEntry
+	warnings     []sshconfig.Warning
+	filter       string
+	searchActive bool
+	cursor       int
+	groupCursor  int
+	status       string
+	showHelp     bool
+	mode         appMode
+	form         formState
+	pending      pendingOperation
+	manager      terminal.Manager
+	load         func() ([]sshconfig.HostEntry, []sshconfig.Warning, error)
+	statePath    string
+	state        state.Store
+	selected     map[string]bool
+	now          func() time.Time
+	width        int
+	height       int
+	focus        focusKind
+	groupInline  groupInlineState
+	groupPicker  groupPickerState
 
 	showRawPreview bool
+	previewVisible bool
 
 	monitor        *monitor.Cache
 	probe          monitor.ProbeFunc
@@ -67,6 +70,8 @@ const (
 	modeForm
 	modeConfirm
 	modeGroupInline
+	modeGroupPicker
+	modeWarnings
 )
 
 type focusKind int
@@ -93,14 +98,15 @@ type formState struct {
 	entry     sshconfig.HostEntry
 	values    sshconfig.HostForm
 	field     int
+	cursor    int
 }
 
 // groupInlineState holds the temporary input buffer for the lightweight
 // modeGroupInline (used by sidebar `a` create / `r` rename actions).
 type groupInlineState struct {
-	action  groupInlineAction
-	buffer  string
-	target  string // the existing group name being renamed; empty when creating
+	action groupInlineAction
+	buffer string
+	target string // the existing group name being renamed; empty when creating
 }
 
 type groupInlineAction int
@@ -110,6 +116,15 @@ const (
 	groupInlineCreate
 	groupInlineRename
 )
+
+// groupPickerState holds the temporary target selection for list-level `g`
+// moves. movingHosts is fixed when the picker opens so filter/cursor changes do
+// not change the operation's source set.
+type groupPickerState struct {
+	buffer      string
+	cursor      int
+	movingHosts []sshconfig.HostEntry
+}
 
 type pendingOperation struct {
 	operation   operationType
@@ -122,12 +137,13 @@ type pendingOperation struct {
 }
 
 type dashboardCounts struct {
-	Hosts     int
-	Matched   int
-	Favorites int
-	Recent    int
-	Selected  int
-	Warnings  int
+	Hosts           int
+	Matched         int
+	Favorites       int
+	Recent          int
+	Selected        int
+	VisibleSelected int
+	Warnings        int
 }
 
 type groupItem struct {
@@ -169,16 +185,17 @@ func NewModel(cfg Config) Model {
 		now = time.Now
 	}
 	m := Model{
-		configPath: cfg.ConfigPath,
-		entries:    cfg.Entries,
-		warnings:   cfg.Warnings,
-		manager:    manager,
-		load:       cfg.Load,
-		statePath:  cfg.StatePath,
-		state:      store,
-		selected:   map[string]bool{},
-		now:        now,
-		status:     statusFromWarnings(cfg.Warnings),
+		configPath:     cfg.ConfigPath,
+		entries:        cfg.Entries,
+		warnings:       cfg.Warnings,
+		manager:        manager,
+		load:           cfg.Load,
+		statePath:      cfg.StatePath,
+		state:          store,
+		selected:       map[string]bool{},
+		now:            now,
+		status:         statusFromWarnings(cfg.Warnings),
+		previewVisible: true,
 		monitor:        cfg.Monitor,
 		probe:          cfg.Probe,
 		monitorVisible: cfg.MonitorVisible,
@@ -237,6 +254,7 @@ func (m Model) dispatch(msg tea.Msg) (Model, tea.Cmd) {
 		m.mode = modeBrowse
 		m.form = formState{}
 		m.pending = pendingOperation{}
+		m.groupPicker = groupPickerState{}
 		m.selected = map[string]bool{}
 		m.status = "config saved"
 		return m, tea.Batch(m.reloadCmd(), m.saveStateCmd())
@@ -290,6 +308,7 @@ func (m Model) Selected() (sshconfig.HostEntry, bool) {
 func (m Model) dashboardCounts() dashboardCounts {
 	favorites := 0
 	recent := 0
+	visibleSelected := 0
 	for _, entry := range m.entries {
 		host := m.state.Hosts[entry.Alias]
 		if host.Favorite {
@@ -299,23 +318,33 @@ func (m Model) dashboardCounts() dashboardCounts {
 			recent++
 		}
 	}
+	for _, entry := range m.filtered {
+		if m.selected[entry.Alias] {
+			visibleSelected++
+		}
+	}
 	return dashboardCounts{
-		Hosts:     len(m.entries),
-		Matched:   len(m.filtered),
-		Favorites: favorites,
-		Recent:    recent,
-		Selected:  len(m.selected),
-		Warnings:  len(m.warnings),
+		Hosts:           len(m.entries),
+		Matched:         len(m.filtered),
+		Favorites:       favorites,
+		Recent:          recent,
+		Selected:        len(m.selected),
+		VisibleSelected: visibleSelected,
+		Warnings:        len(m.warnings),
 	}
 }
 
 func (m Model) handleKey(key tea.KeyMsg) (Model, tea.Cmd) {
+	if key.Type == tea.KeyCtrlC {
+		return m, tea.Quit
+	}
+	if m.searchActive {
+		return m.handleSearchKey(key)
+	}
 	if m.focus == focusSidebar {
 		return m.handleSidebarKey(key)
 	}
 	switch key.Type {
-	case tea.KeyCtrlC:
-		return m, tea.Quit
 	case tea.KeyEsc:
 		if m.showHelp {
 			m.showHelp = false
@@ -333,13 +362,6 @@ func (m Model) handleKey(key tea.KeyMsg) (Model, tea.Cmd) {
 		return m, m.connectCmd()
 	case tea.KeySpace:
 		return m.toggleSelected(), nil
-	case tea.KeyBackspace, tea.KeyDelete:
-		if len(m.filter) > 0 {
-			runes := []rune(m.filter)
-			m.filter = string(runes[:len(runes)-1])
-			m.cursor = 0
-			m.applyFilter()
-		}
 	case tea.KeyUp:
 		if m.cursor > 0 {
 			m.cursor--
@@ -348,28 +370,44 @@ func (m Model) handleKey(key tea.KeyMsg) (Model, tea.Cmd) {
 		if m.cursor < len(m.filtered)-1 {
 			m.cursor++
 		}
+	case tea.KeyPgUp:
+		m.moveCursorBy(-m.listPageSize())
+	case tea.KeyPgDown:
+		m.moveCursorBy(m.listPageSize())
+	case tea.KeyHome:
+		m.cursor = 0
+	case tea.KeyEnd:
+		if len(m.filtered) > 0 {
+			m.cursor = len(m.filtered) - 1
+		}
 	case tea.KeyLeft:
 		m.moveGroup(-1)
 	case tea.KeyRight:
 		m.moveGroup(1)
 	case tea.KeyRunes:
-		if m.filter != "" {
-			m.filter += key.String()
-			m.cursor = 0
-			m.applyFilter()
-			return m, nil
+		if key.String() == "/" {
+			return m.startSearch(), nil
 		}
 		switch key.String() {
 		case "q":
 			return m, tea.Quit
 		case "?":
 			m.showHelp = !m.showHelp
+		case "W":
+			if len(m.warnings) == 0 {
+				m.status = "no warnings"
+				return m, nil
+			}
+			m.mode = modeWarnings
+			m.status = ""
+			return m, nil
 		case "A":
 			m.mode = modeForm
 			m.status = ""
 			m.form = formState{
 				operation: operationAdd,
 				values:    sshconfig.HostForm{},
+				cursor:    0,
 			}
 		case "e":
 			entry, ok := m.Selected()
@@ -377,13 +415,17 @@ func (m Model) handleKey(key tea.KeyMsg) (Model, tea.Cmd) {
 				m.status = "no host selected"
 				return m, nil
 			}
+			values := formFromEntry(entry)
 			m.mode = modeForm
 			m.status = ""
 			m.form = formState{
 				operation: operationEdit,
 				entry:     entry,
-				values:    formFromEntry(entry),
+				values:    values,
+				cursor:    formFieldLen(values, 0),
 			}
+		case "g":
+			return m.startGroupPicker()
 		case "d":
 			entry, ok := m.Selected()
 			if !ok {
@@ -399,13 +441,15 @@ func (m Model) handleKey(key tea.KeyMsg) (Model, tea.Cmd) {
 			}
 		case "r":
 			return m, m.reloadCmd()
+		case "R":
+			return m.refreshMonitor()
 		case "f":
 			return m.toggleFavorite()
-		case "/":
-			m.filter = ""
 		case "v":
 			m.showRawPreview = !m.showRawPreview
 			return m, nil
+		case "P":
+			return m.togglePreview(), nil
 		case "M":
 			if m.monitor != nil {
 				m.monitorVisible = !m.monitorVisible
@@ -420,13 +464,59 @@ func (m Model) handleKey(key tea.KeyMsg) (Model, tea.Cmd) {
 			m.moveGroup(-1)
 		case "]":
 			m.moveGroup(1)
-		default:
+		}
+	}
+	return m, nil
+}
+
+func (m Model) startSearch() Model {
+	m.focus = focusList
+	m.searchActive = true
+	m.filter = ""
+	m.cursor = 0
+	m.status = ""
+	m.applyFilter()
+	return m
+}
+
+func (m Model) handleSearchKey(key tea.KeyMsg) (Model, tea.Cmd) {
+	switch key.Type {
+	case tea.KeyCtrlC:
+		return m, tea.Quit
+	case tea.KeyEsc, tea.KeyEnter:
+		m.searchActive = false
+		return m, nil
+	case tea.KeyBackspace, tea.KeyDelete:
+		if len(m.filter) > 0 {
+			runes := []rune(m.filter)
+			m.filter = string(runes[:len(runes)-1])
+			m.cursor = 0
+			m.applyFilter()
+		}
+	case tea.KeyCtrlU:
+		m.filter = ""
+		m.cursor = 0
+		m.applyFilter()
+	case tea.KeyRunes:
+		if key.String() == "/" {
+			m.filter = ""
+		} else {
 			m.filter += key.String()
 		}
 		m.cursor = 0
 		m.applyFilter()
 	}
 	return m, nil
+}
+
+func (m Model) togglePreview() Model {
+	m.previewVisible = !m.previewVisible
+	if m.previewVisible {
+		m.status = "preview on"
+	} else {
+		m.status = "preview off"
+	}
+	return m
 }
 
 // handleSidebarKey is invoked from handleKey when focus is on the sidebar
@@ -465,6 +555,21 @@ func (m Model) handleSidebarKey(key tea.KeyMsg) (Model, tea.Cmd) {
 		case "?":
 			m.showHelp = !m.showHelp
 			return m, nil
+		case "W":
+			if len(m.warnings) == 0 {
+				m.status = "no warnings"
+				return m, nil
+			}
+			m.mode = modeWarnings
+			m.status = ""
+			return m, nil
+		case "R":
+			m.focus = focusList
+			return m.refreshMonitor()
+		case "/":
+			return m.startSearch(), nil
+		case "P":
+			return m.togglePreview(), nil
 		case "j":
 			m.moveGroup(1)
 			return m, nil
@@ -567,9 +672,9 @@ func (m Model) startMoveMarkedHosts(target string) (Model, tea.Cmd) {
 	}
 	m.mode = modeConfirm
 	m.pending = pendingOperation{
-		operation:    operationGroupMoveHosts,
-		groupTo:      target,
-		movingHosts:  m.collectSelectedEntries(),
+		operation:   operationGroupMoveHosts,
+		groupTo:     target,
+		movingHosts: m.collectSelectedEntries(),
 	}
 	m.status = ""
 	return m, nil
@@ -583,6 +688,22 @@ func (m Model) collectSelectedEntries() []sshconfig.HostEntry {
 		}
 	}
 	return out
+}
+
+func (m Model) startGroupPicker() (Model, tea.Cmd) {
+	hosts := m.collectSelectedEntries()
+	if len(hosts) == 0 {
+		entry, ok := m.Selected()
+		if !ok {
+			m.status = "no host selected"
+			return m, nil
+		}
+		hosts = []sshconfig.HostEntry{entry}
+	}
+	m.mode = modeGroupPicker
+	m.groupPicker = groupPickerState{movingHosts: hosts}
+	m.status = ""
+	return m, nil
 }
 
 // shiftGroupOrder moves `name` up (-1) or down (+1) in state.GroupOrder. If
@@ -635,9 +756,28 @@ func (m Model) handleModeKey(key tea.KeyMsg) (Model, tea.Cmd) {
 	if m.mode == modeGroupInline {
 		return m.handleGroupInlineKey(key)
 	}
+	if m.mode == modeGroupPicker {
+		return m.handleGroupPickerKey(key)
+	}
+	if m.mode == modeWarnings {
+		return m.handleWarningsKey(key)
+	}
 	switch key.Type {
 	case tea.KeyCtrlC:
 		return m, tea.Quit
+	case tea.KeyCtrlA, tea.KeyHome:
+		if m.mode == modeForm {
+			m.form.cursor = 0
+		}
+	case tea.KeyCtrlE, tea.KeyEnd:
+		if m.mode == modeForm {
+			m.form.cursor = formFieldLen(m.form.values, m.form.field)
+		}
+	case tea.KeyCtrlU:
+		if m.mode == modeForm {
+			m.form.values = replaceFormField(m.form.values, m.form.field, "")
+			m.form.cursor = 0
+		}
 	case tea.KeyCtrlS:
 		if m.mode == modeForm {
 			return m.prepareFormSave()
@@ -651,28 +791,38 @@ func (m Model) handleModeKey(key tea.KeyMsg) (Model, tea.Cmd) {
 	case tea.KeyUp:
 		if m.mode == modeForm && m.form.field > 0 {
 			m.form.field--
+			m.form.cursor = formFieldLen(m.form.values, m.form.field)
 		}
 	case tea.KeyDown:
 		if m.mode == modeForm && m.form.field < len(formFields())-1 {
 			m.form.field++
+			m.form.cursor = formFieldLen(m.form.values, m.form.field)
+		}
+	case tea.KeyLeft:
+		if m.mode == modeForm && m.form.cursor > 0 {
+			m.form.cursor--
+		}
+	case tea.KeyRight:
+		if m.mode == modeForm && m.form.cursor < formFieldLen(m.form.values, m.form.field) {
+			m.form.cursor++
 		}
 	case tea.KeyTab:
 		if m.mode == modeForm && m.form.field == formFieldGroupIndex() {
 			m.form.values.Group = nextKnownGroup(m.form.values.Group, m.knownGroupSet())
+			m.form.cursor = formFieldLen(m.form.values, m.form.field)
 			return m, nil
 		}
 		if m.mode == modeForm && m.form.field < len(formFields())-1 {
 			m.form.field++
+			m.form.cursor = formFieldLen(m.form.values, m.form.field)
 		}
 	case tea.KeyBackspace, tea.KeyDelete:
 		if m.mode == modeForm {
-			m.form.values = updateFormField(m.form.values, m.form.field, func(value string) string {
-				runes := []rune(value)
-				if len(runes) == 0 {
-					return value
-				}
-				return string(runes[:len(runes)-1])
-			})
+			if key.Type == tea.KeyBackspace {
+				m.form.values, m.form.cursor = deleteBeforeFormCursor(m.form.values, m.form.field, m.form.cursor)
+			} else {
+				m.form.values = deleteAtFormCursor(m.form.values, m.form.field, m.form.cursor)
+			}
 		}
 	case tea.KeyRunes:
 		if key.String() == "s" && m.mode == modeConfirm {
@@ -680,12 +830,157 @@ func (m Model) handleModeKey(key tea.KeyMsg) (Model, tea.Cmd) {
 		}
 		if m.mode == modeForm {
 			text := key.String()
-			m.form.values = updateFormField(m.form.values, m.form.field, func(value string) string {
-				return value + text
-			})
+			m.form.values, m.form.cursor = insertAtFormCursor(m.form.values, m.form.field, m.form.cursor, text)
 		}
 	}
 	return m, nil
+}
+
+func (m Model) handleWarningsKey(key tea.KeyMsg) (Model, tea.Cmd) {
+	switch key.Type {
+	case tea.KeyCtrlC:
+		return m, tea.Quit
+	case tea.KeyEsc, tea.KeyEnter:
+		m.mode = modeBrowse
+		m.status = ""
+		return m, nil
+	case tea.KeyRunes:
+		switch key.String() {
+		case "q":
+			return m, tea.Quit
+		case "W", "?":
+			m.mode = modeBrowse
+			m.status = ""
+			return m, nil
+		}
+	}
+	return m, nil
+}
+
+func (m Model) handleGroupPickerKey(key tea.KeyMsg) (Model, tea.Cmd) {
+	switch key.Type {
+	case tea.KeyCtrlC:
+		return m, tea.Quit
+	case tea.KeyEsc:
+		m.mode = modeBrowse
+		m.groupPicker = groupPickerState{}
+		m.status = ""
+		return m, nil
+	case tea.KeyEnter:
+		return m.commitGroupPicker()
+	case tea.KeyUp:
+		m.moveGroupPickerCursor(-1)
+		return m, nil
+	case tea.KeyDown:
+		m.moveGroupPickerCursor(1)
+		return m, nil
+	case tea.KeyBackspace, tea.KeyDelete:
+		runes := []rune(m.groupPicker.buffer)
+		if len(runes) > 0 {
+			m.groupPicker.buffer = string(runes[:len(runes)-1])
+			m.groupPicker.cursor = 0
+			m.status = ""
+		}
+		return m, nil
+	case tea.KeyRunes:
+		switch key.String() {
+		case "j":
+			if m.groupPicker.buffer == "" {
+				m.moveGroupPickerCursor(1)
+				return m, nil
+			}
+		case "k":
+			if m.groupPicker.buffer == "" {
+				m.moveGroupPickerCursor(-1)
+				return m, nil
+			}
+		}
+		m.groupPicker.buffer += key.String()
+		m.groupPicker.cursor = 0
+		m.status = ""
+		return m, nil
+	}
+	return m, nil
+}
+
+func (m *Model) moveGroupPickerCursor(delta int) {
+	candidates := m.groupPickerCandidates()
+	if len(candidates) == 0 {
+		m.groupPicker.cursor = 0
+		return
+	}
+	m.groupPicker.cursor += delta
+	if m.groupPicker.cursor < 0 {
+		m.groupPicker.cursor = len(candidates) - 1
+	}
+	if m.groupPicker.cursor >= len(candidates) {
+		m.groupPicker.cursor = 0
+	}
+}
+
+func (m Model) commitGroupPicker() (Model, tea.Cmd) {
+	target := m.groupPickerTarget()
+	if target == "" {
+		m.status = "type a group name"
+		return m, nil
+	}
+	if err := sshconfig.ValidateGroupName(target); err != nil {
+		m.status = err.Error()
+		return m, nil
+	}
+	if len(m.groupPicker.movingHosts) == 0 {
+		m.status = "no host selected"
+		return m, nil
+	}
+	m.mode = modeConfirm
+	m.pending = pendingOperation{
+		operation:   operationGroupMoveHosts,
+		groupTo:     target,
+		movingHosts: append([]sshconfig.HostEntry(nil), m.groupPicker.movingHosts...),
+	}
+	m.groupPicker = groupPickerState{}
+	m.status = ""
+	return m, nil
+}
+
+func (m Model) groupPickerTarget() string {
+	buffer := strings.TrimSpace(m.groupPicker.buffer)
+	if buffer != "" && !m.isKnownGroup(buffer) {
+		return buffer
+	}
+	candidates := m.groupPickerCandidates()
+	if len(candidates) == 0 {
+		return buffer
+	}
+	cursor := m.groupPicker.cursor
+	if cursor < 0 || cursor >= len(candidates) {
+		cursor = 0
+	}
+	return candidates[cursor]
+}
+
+func (m Model) groupPickerCandidates() []string {
+	query := strings.ToLower(strings.TrimSpace(m.groupPicker.buffer))
+	var names []string
+	for _, item := range m.groupItems() {
+		if item.Name == "all" || item.Name == "ungrouped" {
+			continue
+		}
+		if query != "" && !strings.Contains(strings.ToLower(item.Name), query) {
+			continue
+		}
+		names = append(names, item.Name)
+	}
+	return names
+}
+
+func (m Model) isKnownGroup(name string) bool {
+	for _, item := range m.groupItems() {
+		if item.Name == name && item.Name != "all" && item.Name != "ungrouped" {
+			return true
+		}
+	}
+	return false
 }
 
 func (m Model) handleGroupInlineKey(key tea.KeyMsg) (Model, tea.Cmd) {
@@ -941,6 +1236,35 @@ func (m Model) maybeProbeCmd() tea.Cmd {
 	if !m.monitor.NeedsRefresh(entry.Alias) {
 		return nil
 	}
+	return m.probeCmd(entry)
+}
+
+func (m Model) refreshMonitor() (Model, tea.Cmd) {
+	if m.monitor == nil || m.probe == nil {
+		m.status = "monitor unavailable"
+		return m, nil
+	}
+	if !m.monitorVisible {
+		m.monitorVisible = true
+	}
+	entry, ok := m.Selected()
+	if !ok {
+		m.status = "no host selected"
+		return m, nil
+	}
+	cmd := m.probeCmd(entry)
+	if cmd == nil {
+		m.status = "monitor already refreshing"
+		return m, nil
+	}
+	m.status = "refreshing monitor"
+	return m, cmd
+}
+
+func (m Model) probeCmd(entry sshconfig.HostEntry) tea.Cmd {
+	if m.monitor == nil || m.probe == nil {
+		return nil
+	}
 	if !m.monitor.MarkInflight(entry.Alias) {
 		return nil
 	}
@@ -1035,7 +1359,7 @@ func (m Model) matches(entry sshconfig.HostEntry, query string) bool {
 			}
 			continue
 		}
-		if !strings.Contains(haystack, part) {
+		if !strings.Contains(haystack, part) && !fuzzyContains(haystack, part) {
 			return false
 		}
 	}
@@ -1043,6 +1367,13 @@ func (m Model) matches(entry sshconfig.HostEntry, query string) bool {
 }
 
 func (m Model) less(a, b sshconfig.HostEntry) bool {
+	if strings.TrimSpace(m.filter) != "" {
+		aRank := m.matchRank(a)
+		bRank := m.matchRank(b)
+		if aRank != bRank {
+			return aRank < bRank
+		}
+	}
 	aState := m.state.Hosts[a.Alias]
 	bState := m.state.Hosts[b.Alias]
 	if aState.Favorite != bState.Favorite {
@@ -1057,6 +1388,76 @@ func (m Model) less(a, b sshconfig.HostEntry) bool {
 		return aState.ConnectCount > bState.ConnectCount
 	}
 	return a.Alias < b.Alias
+}
+
+func (m Model) matchRank(entry sshconfig.HostEntry) int {
+	terms := textSearchTerms(m.filter)
+	if len(terms) == 0 {
+		return 0
+	}
+	alias := strings.ToLower(entry.Alias)
+	host := strings.ToLower(entry.HostName)
+	haystack := strings.ToLower(strings.Join([]string{
+		entry.Alias,
+		entry.Group,
+		entry.HostName,
+		entry.User,
+		entry.Port,
+		entry.ProxyJump,
+		entry.SourceFile,
+		strings.Join(entry.Tags, " "),
+	}, " "))
+
+	score := 0
+	for _, term := range terms {
+		switch {
+		case alias == term:
+			score += 0
+		case strings.HasPrefix(alias, term):
+			score += 1
+		case strings.Contains(alias, term):
+			score += 2
+		case strings.Contains(host, term):
+			score += 3
+		case fuzzyContains(alias, term):
+			score += 4
+		case strings.Contains(haystack, term):
+			score += 5
+		default:
+			score += 6
+		}
+	}
+	return score
+}
+
+func textSearchTerms(query string) []string {
+	parts := strings.Fields(strings.ToLower(strings.TrimSpace(query)))
+	terms := make([]string, 0, len(parts))
+	for _, part := range parts {
+		if strings.HasPrefix(part, "tag:") || part == "fav:" || part == "recent:" {
+			continue
+		}
+		terms = append(terms, part)
+	}
+	return terms
+}
+
+func fuzzyContains(haystack, needle string) bool {
+	if needle == "" {
+		return true
+	}
+	hr := []rune(strings.ToLower(haystack))
+	nr := []rune(strings.ToLower(needle))
+	j := 0
+	for _, r := range hr {
+		if r == nr[j] {
+			j++
+			if j == len(nr) {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func (m Model) toggleFavorite() (Model, tea.Cmd) {
@@ -1101,8 +1502,8 @@ func (m Model) connectTargets() []terminal.Target {
 		}
 		return []terminal.Target{targetFromEntry(entry)}
 	}
-	targets := make([]terminal.Target, 0, len(m.filtered))
-	for _, entry := range m.filtered {
+	targets := make([]terminal.Target, 0, len(m.selected))
+	for _, entry := range m.entries {
 		if m.selected[entry.Alias] {
 			targets = append(targets, targetFromEntry(entry))
 		}
@@ -1233,6 +1634,35 @@ func (m *Model) moveGroup(delta int) {
 	m.applyFilter()
 }
 
+func (m *Model) moveCursorBy(delta int) {
+	if len(m.filtered) == 0 {
+		m.cursor = 0
+		return
+	}
+	m.cursor += delta
+	if m.cursor < 0 {
+		m.cursor = 0
+	}
+	if m.cursor >= len(m.filtered) {
+		m.cursor = len(m.filtered) - 1
+	}
+}
+
+func (m Model) listPageSize() int {
+	if m.height <= 0 {
+		return 10
+	}
+	footer := len(m.footerLines())
+	if m.status != "" {
+		footer++
+	}
+	page := m.height - footer - 3 // top status, search line, spacer
+	if page < 1 {
+		return 1
+	}
+	return page
+}
+
 func statusFromWarnings(warnings []sshconfig.Warning) string {
 	if len(warnings) == 0 {
 		return ""
@@ -1271,6 +1701,76 @@ func validateFormForApp(form sshconfig.HostForm) error {
 
 func formFields() []string {
 	return []string{"Alias", "Group", "HostName", "User", "Port", "IdentityFile", "ProxyJump", "ProxyCommand", "Tags"}
+}
+
+func formFieldValue(form sshconfig.HostForm, field int) string {
+	switch field {
+	case 0:
+		return form.Alias
+	case 1:
+		return form.Group
+	case 2:
+		return form.HostName
+	case 3:
+		return form.User
+	case 4:
+		return form.Port
+	case 5:
+		return form.IdentityFile
+	case 6:
+		return form.ProxyJump
+	case 7:
+		return form.ProxyCommand
+	case 8:
+		return strings.Join(form.Tags, " ")
+	default:
+		return ""
+	}
+}
+
+func formFieldLen(form sshconfig.HostForm, field int) int {
+	return len([]rune(formFieldValue(form, field)))
+}
+
+func replaceFormField(form sshconfig.HostForm, field int, value string) sshconfig.HostForm {
+	return updateFormField(form, field, func(string) string { return value })
+}
+
+func insertAtFormCursor(form sshconfig.HostForm, field, cursor int, text string) (sshconfig.HostForm, int) {
+	value := formFieldValue(form, field)
+	runes := []rune(value)
+	if cursor < 0 {
+		cursor = 0
+	}
+	if cursor > len(runes) {
+		cursor = len(runes)
+	}
+	insert := []rune(text)
+	next := string(append(append(append([]rune{}, runes[:cursor]...), insert...), runes[cursor:]...))
+	return replaceFormField(form, field, next), cursor + len(insert)
+}
+
+func deleteBeforeFormCursor(form sshconfig.HostForm, field, cursor int) (sshconfig.HostForm, int) {
+	value := formFieldValue(form, field)
+	runes := []rune(value)
+	if cursor <= 0 || len(runes) == 0 {
+		return form, max(0, cursor)
+	}
+	if cursor > len(runes) {
+		cursor = len(runes)
+	}
+	next := string(append(append([]rune{}, runes[:cursor-1]...), runes[cursor:]...))
+	return replaceFormField(form, field, next), cursor - 1
+}
+
+func deleteAtFormCursor(form sshconfig.HostForm, field, cursor int) sshconfig.HostForm {
+	value := formFieldValue(form, field)
+	runes := []rune(value)
+	if cursor < 0 || cursor >= len(runes) {
+		return form
+	}
+	next := string(append(append([]rune{}, runes[:cursor]...), runes[cursor+1:]...))
+	return replaceFormField(form, field, next)
 }
 
 func updateFormField(form sshconfig.HostForm, field int, update func(string) string) sshconfig.HostForm {

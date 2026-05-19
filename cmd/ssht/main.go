@@ -12,17 +12,18 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 
-	"github.com/dong/ssh-config-tmux-tui/internal/app"
-	"github.com/dong/ssh-config-tmux-tui/internal/monitor"
-	"github.com/dong/ssh-config-tmux-tui/internal/sshconfig"
-	"github.com/dong/ssh-config-tmux-tui/internal/state"
-	"github.com/dong/ssh-config-tmux-tui/internal/terminal"
+	"github.com/dong/ssht/internal/app"
+	"github.com/dong/ssht/internal/monitor"
+	"github.com/dong/ssht/internal/sshconfig"
+	"github.com/dong/ssht/internal/state"
+	"github.com/dong/ssht/internal/terminal"
 )
 
 type options struct {
 	ConfigPath     string
 	NoInclude      bool
 	PrintHosts     bool
+	ConnectHost    string
 	Debug          bool
 	Terminal       string
 	OpenMode       string
@@ -53,6 +54,13 @@ func main() {
 
 	if options.PrintHosts {
 		if err := json.NewEncoder(os.Stdout).Encode(entries); err != nil {
+			exitErr(err)
+		}
+		return
+	}
+
+	if options.ConnectHost != "" {
+		if err := connectHost(options.ConnectHost, entries, options); err != nil {
 			exitErr(err)
 		}
 		return
@@ -120,9 +128,10 @@ func parseOptions(args []string) (options, error) {
 	flags.StringVar(&opts.ConfigPath, "config", opts.ConfigPath, "path to ssh config")
 	flags.BoolVar(&opts.NoInclude, "no-include", false, "disable Include parsing")
 	flags.BoolVar(&opts.PrintHosts, "print-hosts", false, "print discovered hosts as JSON")
+	flags.StringVar(&opts.ConnectHost, "connect", "", "open an SSH connection for the given Host alias without starting the TUI")
 	flags.BoolVar(&opts.Debug, "debug", false, "print parser warnings to stderr")
 	flags.StringVar(&opts.Terminal, "terminal", opts.Terminal, "terminal backend: auto, iterm, terminal, wezterm, kitty, alacritty, ghostty")
-	flags.StringVar(&opts.OpenMode, "open-mode", opts.OpenMode, "terminal open mode: window, tab")
+	flags.StringVar(&opts.OpenMode, "open-mode", opts.OpenMode, "terminal open mode: auto, window, tab")
 	flags.BoolVar(&opts.Monitor, "monitor", false, "show the SSH monitoring panel on startup (toggle anytime with M)")
 	flags.DurationVar(&opts.MonitorTTL, "monitor-ttl", opts.MonitorTTL, "how long a monitor snapshot stays fresh")
 	flags.DurationVar(&opts.MonitorTimeout, "monitor-timeout", opts.MonitorTimeout, "hard timeout for one monitor SSH probe")
@@ -138,12 +147,53 @@ func parseOptions(args []string) (options, error) {
 	}
 	opts.OpenMode = strings.ToLower(strings.TrimSpace(opts.OpenMode))
 	if opts.OpenMode == "" {
-		opts.OpenMode = string(terminal.OpenModeTab)
+		opts.OpenMode = string(terminal.OpenModeAuto)
 	}
 	if !terminal.ValidOpenMode(terminal.OpenMode(opts.OpenMode)) {
-		return options{}, errors.New("unsupported open mode " + opts.OpenMode + "; supported modes: window, tab")
+		return options{}, errors.New("unsupported open mode " + opts.OpenMode + "; supported modes: auto, window, tab")
 	}
 	return opts, nil
+}
+
+func connectHost(alias string, entries []sshconfig.HostEntry, opts options) error {
+	entry, ok := findHost(entries, strings.TrimSpace(alias))
+	if !ok {
+		return fmt.Errorf("host %q not found", alias)
+	}
+
+	manager := terminal.New()
+	manager.Preference = opts.Terminal
+	manager.OpenMode = terminal.OpenMode(opts.OpenMode)
+	if err := manager.Connect(terminal.Target{Alias: entry.Alias, SSHPassword: entry.SSHPassword}); err != nil {
+		return err
+	}
+
+	if err := recordConnect(entry.Alias, time.Now()); err != nil {
+		fmt.Fprintln(os.Stderr, "warning:", err)
+	}
+	return nil
+}
+
+func findHost(entries []sshconfig.HostEntry, alias string) (sshconfig.HostEntry, bool) {
+	if alias == "" {
+		return sshconfig.HostEntry{}, false
+	}
+	for _, entry := range entries {
+		if entry.Alias == alias {
+			return entry, true
+		}
+	}
+	return sshconfig.HostEntry{}, false
+}
+
+func recordConnect(alias string, now time.Time) error {
+	statePath := state.DefaultPath()
+	store, err := state.Load(statePath)
+	if err != nil {
+		return err
+	}
+	store.RecordConnect(alias, now)
+	return state.Save(statePath, store)
 }
 
 func terminalPreferenceDefault() string {
@@ -157,7 +207,7 @@ func openModeDefault() string {
 	if value := strings.TrimSpace(os.Getenv("SSHT_OPEN_MODE")); value != "" {
 		return value
 	}
-	return string(terminal.OpenModeTab)
+	return string(terminal.OpenModeAuto)
 }
 
 func validTerminalPreference(value string) bool {

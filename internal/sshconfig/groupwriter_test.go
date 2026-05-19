@@ -103,6 +103,22 @@ func TestRenameGroupMultiFile(t *testing.T) {
 	}
 }
 
+func TestRenameGroupPreservesHiddenMetadata(t *testing.T) {
+	path := writeTemp(t, "# ssht: group=prod hidden=true tags=db\nHost hidden-db\n    HostName 1.1.1.1\n")
+
+	res, err := RenameGroup([]string{path}, "prod", "production")
+	if err != nil {
+		t.Fatalf("RenameGroup: %v", err)
+	}
+	if res.HostsChanged != 1 {
+		t.Fatalf("HostsChanged = %d, want 1", res.HostsChanged)
+	}
+	content := readFileGW(t, path)
+	if !strings.Contains(content, "group=production") || !strings.Contains(content, "hidden=true") || !strings.Contains(content, "tags=db") {
+		t.Fatalf("metadata not preserved:\n%s", content)
+	}
+}
+
 func TestMergeGroupCollisionsResolved(t *testing.T) {
 	path := writeTemp(t, `# ssht: group=staging
 Host stg-a

@@ -20,6 +20,24 @@
 INSTALL_DIR=/usr/local/bin ./install.sh
 ```
 
+## GitHub 发布
+
+仓库内置 GitHub Actions：
+
+- `CI`：在 push、pull request 和手动触发时运行 Go 测试，并构建 Raycast extension。
+- `Release`：推送 `v*` tag 或手动触发时，先运行测试，再构建 macOS、Linux、Windows
+  的 `ssht` 发布包，生成 `checksums.txt`，并自动上传到 GitHub Release。
+
+正式发布：
+
+```bash
+git tag v1.0.0
+git push origin v1.0.0
+```
+
+也可以在 GitHub Actions 页面手动运行 `Release` workflow，填写版本号，例如
+`v1.0.0`。发布产物会自动附加到对应 GitHub Release。
+
 ## 使用
 
 ```bash
@@ -31,14 +49,17 @@ ssht --print-hosts
 ssht --terminal terminal
 ssht --open-mode tab
 ssht --monitor
+ssht --connect prod-api-01
 ```
 
 `--print-hosts` 会把发现的主机以 JSON 输出，方便脚本和测试夹具使用。
+`--connect <alias>` 会跳过 TUI，直接按当前终端设置打开指定 `Host` 别名，并记录到本地
+最近连接状态；这个入口主要供 Raycast 等外部启动器调用。
 `--no-include` 会禁用 `Include` 递归解析。`--debug` 会把解析 warning 输出到
 stderr，同时仍然展示已经成功解析的主机。`--terminal` 用来选择终端后端，支持
 `auto`、`iterm`、`terminal`、`wezterm`、`kitty`、`alacritty` 和 `ghostty`。
 默认值是 `auto`，也可以通过 `SSHT_TERMINAL` 环境变量设置。
-`--open-mode` 用来选择打开方式，支持 `window` 和 `tab`。默认值是 `tab`，
+`--open-mode` 用来选择打开方式，支持 `auto`、`window` 和 `tab`。默认值是 `auto`，
 也可以通过 `SSHT_OPEN_MODE` 环境变量设置。
 `--monitor` 在启动时直接打开右侧的 SSH 监控面板（Health + Top CPU）；
 默认不显示，进入 TUI 后可以随时按大写 `M` 切换显隐。
@@ -46,20 +67,25 @@ stderr，同时仍然展示已经成功解析的主机。`--terminal` 用来选�
 ## 快捷键
 
 - 直接输入文字：筛选主机
+- `/`：清空当前筛选并回到完整列表
 - `tag:<name>`：按标签筛选主机
 - `fav:`：只显示收藏主机
 - `recent:`：只显示曾经打开过的主机
 - `[` / `]` 或 Left / Right：切换分组
+- `PgUp` / `PgDn` / `Home` / `End`：快速移动主机列表光标
 - `Tab`：在主机列表与左侧分组侧栏之间切换焦点
 - `Enter`：按配置的终端打开方式连接选中的主机
-- `Space`：标记或取消标记主机，用于批量打开
+- `Space`：标记或取消标记主机，用于跨筛选/跨分组批量打开
 - `f`：收藏或取消收藏选中的主机
 - `e`：编辑选中的主机
 - `A`：新增主机
 - `d`：删除选中的主机
 - `Ctrl+S`：在新增/编辑表单中进入保存确认
 - `s`：确认待执行的写入操作
+- `g`：把当前主机或已标记主机移动到分组（可选择已有分组或输入新分组名）
 - `r`：重新加载 SSH config
+- `R`：立即刷新当前主机的 monitor 快照（会自动打开 monitor 面板）
+- `W`：查看 SSH config 解析 warning 列表
 - `?`：帮助
 - `q` / `Esc`：退出
 
@@ -70,14 +96,17 @@ stderr，同时仍然展示已经成功解析的主机。`--terminal` 用来选�
 - `r`：重命名当前 group（批量重写所有相关 host 的 `# ssht: group=` 注释）
 - `m`：把当前 group 合并进另一个 group
 - `d`：删除当前 group（成员主机自动落入 `ungrouped`）
-- `M`：把已用 `Space` 标记的主机批量移动到当前 group
+- `M`：把已用 `Space` 标记的主机批量移动到当前 group（高级路径；主机列表里按 `g` 更快）
 - `J` / `K`：在保存的顺序中把当前 group 下移 / 上移
 - `Esc`：把焦点切回主机列表
 
 新增 / 编辑表单中聚焦在 `Group` 字段时按 `Tab` 可在已有 group 名间循环，避免拼错产生新分组。
 
-当使用 `Space` 标记了一个或多个主机后，按 `Enter` 会打开所有已标记主机。
+当使用 `Space` 标记了一个或多个主机后，按 `Enter` 会打开所有已标记主机，即使其中一部分当前因为筛选或分组切换不可见。
 成功连接会记录到本地状态中，用于收藏、最近使用、连接次数以及默认排序。
+
+新增 / 编辑表单支持字段内光标移动：Left / Right 移动光标，`Ctrl+A` / `Ctrl+E`
+跳到当前字段开头 / 末尾，`Ctrl+U` 清空当前字段。
 
 顶部 dashboard 会展示主机总数、当前筛选命中数、本地连接状态计数、已选择主机数
 和解析 warning 数：
@@ -135,7 +164,16 @@ sshpass -p <password> ssh <alias>
 WezTerm、kitty、Alacritty、Ghostty。要强制指定后端，可以使用
 `--terminal <name>`，或设置 `SSHT_TERMINAL`。
 
-默认打开方式是新窗口：
+默认打开方式是自动模式：
+
+```bash
+ssht --open-mode auto
+```
+
+在 iTerm2 会话内运行时，`auto` 会在当前窗口右侧竖向分屏并执行连接；不在
+iTerm2 会话内时，`auto` 会按新 tab 行为打开连接。
+
+要强制使用新窗口：
 
 ```bash
 ssht --open-mode window
@@ -148,12 +186,13 @@ ssht --open-mode tab
 SSHT_OPEN_MODE=tab ssht
 ```
 
-`tab` 模式是严格语义：如果指定的终端后端不支持新 tab，连接会失败并显示错误，
-不会自动退回新窗口。`auto` 模式会跳过不支持当前打开方式的后端。当前新 tab
-支持 iTerm2、Terminal.app、WezTerm、kitty 和 Ghostty；Alacritty 只支持
-`window`。kitty 的新 tab 依赖 kitty remote control，如果本机未启用，对应命令
-会失败并由 TUI 展示错误。若支持 tab 的终端当前没有窗口，`ssht` 会创建首个承载
-连接的窗口，因为 tab 必须隶属于窗口。
+`tab` 和 `window` 是严格语义：显式指定后不会因为当前在 iTerm2 内而自动分屏。
+如果指定的终端后端不支持新 tab，连接会失败并显示错误，不会自动退回新窗口。
+`auto` 模式会跳过不支持当前打开方式的后端。当前新 tab 支持 iTerm2、
+Terminal.app、WezTerm、kitty 和 Ghostty；Alacritty 只支持 `window`。
+kitty 的新 tab 依赖 kitty remote control，如果本机未启用，对应命令会失败并由
+TUI 展示错误。若支持 tab 的终端当前没有窗口，`ssht` 会创建首个承载连接的窗口，
+因为 tab 必须隶属于窗口。
 
 ## SSH config 支持范围
 
@@ -163,6 +202,15 @@ SSHT_OPEN_MODE=tab ssht
 
 `ssht` 还会读取紧挨在 `Host` 配置块之前的可选元数据注释。这些注释会被
 OpenSSH 忽略；当新增或编辑主机并设置 group 或 tags 时，`ssht` 会重写这些注释。
+如果某个 Host 只是给 Git、rsync 等工具使用，不想在主机列表中展示，可以加
+`hidden=true`：
+
+```sshconfig
+# ssht: hidden=true
+Host github.com
+    HostName github.com
+    User git
+```
 
 兼容 `sshm` 风格的 sshpass 注释：
 
@@ -202,3 +250,29 @@ TUI 仍然会启动，并显示清晰的状态 warning。连接会失败，直�
 ### 能否多次打开同一个主机连接？
 
 可以。再次按 `Enter` 会按当前打开方式为同一个主机再打开一个新的连接。
+
+## Raycast 扩展
+
+仓库内置了一个配套 Raycast extension，位于 `raycast/`。它会调用：
+
+- `ssht --print-hosts`：读取并搜索 SSH config 主机
+- `ssht --connect <alias>`：从 Raycast 选中主机后打开 SSH 连接
+
+首次使用：
+
+```bash
+cd raycast
+npm install
+npm run dev
+```
+
+如果 Raycast 找不到 `ssht`，先在项目根目录运行 `./install.sh`，然后到 Raycast
+extension preferences 里把 `ssht Path` 设置为安装脚本输出的绝对路径，例如
+`/Users/<you>/.local/bin/ssht`。
+
+可配置项：
+
+- `ssht Path`：`ssht` 可执行文件路径，默认尝试从 PATH 查找
+- `SSH Config Path`：可选，自定义 SSH config；留空则使用 `~/.ssh/config`
+- `Disable Include Parsing`：是否忽略 `Include`
+- `Terminal` / `Open Mode`：连接时传给 `ssht --terminal` 和 `ssht --open-mode`

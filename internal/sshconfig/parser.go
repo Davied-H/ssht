@@ -83,6 +83,7 @@ type fileParser struct {
 type block struct {
 	aliases []string
 	group   string
+	hidden  bool
 	fields  map[string]string
 	sshPass string
 	tags    []string
@@ -165,6 +166,7 @@ func (p *fileParser) parse(path string, depth int) ([]HostEntry, []Warning) {
 			current = &block{
 				aliases: values,
 				group:   pending.group,
+				hidden:  pending.hidden,
 				fields:  map[string]string{},
 				sshPass: pending.sshPass,
 				tags:    append([]string(nil), pending.tags...),
@@ -219,6 +221,9 @@ func (p *fileParser) parseInclude(parent, pattern string, depth, line int) ([]Ho
 }
 
 func (b block) entries() []HostEntry {
+	if b.hidden {
+		return nil
+	}
 	var entries []HostEntry
 	for _, alias := range b.aliases {
 		if !isConcreteAlias(alias) {
@@ -292,6 +297,7 @@ func splitTags(value string) []string {
 
 type metadata struct {
 	group   string
+	hidden  bool
 	tags    []string
 	sshPass string
 }
@@ -299,6 +305,9 @@ type metadata struct {
 func mergeMetadata(existing, next metadata) metadata {
 	if next.group != "" {
 		existing.group = next.group
+	}
+	if next.hidden {
+		existing.hidden = true
 	}
 	if len(next.tags) > 0 {
 		existing.tags = mergeTags(existing.tags, next.tags)
@@ -331,11 +340,22 @@ func parseMetadataComment(line string) (metadata, bool) {
 		switch strings.ToLower(key) {
 		case "group":
 			meta.group = strings.TrimSpace(value)
+		case "hidden":
+			meta.hidden = parseBoolMetadata(value)
 		case "tags":
 			meta.tags = splitTags(value)
 		}
 	}
 	return meta, true
+}
+
+func parseBoolMetadata(value string) bool {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "1", "true", "yes", "on":
+		return true
+	default:
+		return false
+	}
 }
 
 func parseSSHPasswordComment(body string) (string, bool) {
