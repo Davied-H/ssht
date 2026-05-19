@@ -17,12 +17,12 @@ import (
 func previewModel(t *testing.T, snap *monitor.Snapshot, expanded bool, width, height int) []string {
 	t.Helper()
 	entry := sshconfig.HostEntry{
-		Alias:        "estha-en-dify",
-		HostName:     "4.194.92.132",
+		Alias:        "demo-api",
+		HostName:     "192.0.2.12",
 		Port:         "22",
-		User:         "azureuser",
-		IdentityFile: "~/.ssh/estha-en-dify.pem",
-		SourceFile:   "/Users/dong/.ssh/config",
+		User:         "demo",
+		IdentityFile: "~/.ssh/demo-api.pem",
+		SourceFile:   "~/.ssh/config",
 		SourceLine:   148,
 	}
 	cache := monitor.NewCache(30*time.Second, 5*time.Second)
@@ -76,17 +76,17 @@ func TestPreviewLiveSnapshotCollapsed(t *testing.T) {
 		Load:      "0.18, 0.25, 0.21",
 		Mem:       "4451/15944 MB (28%)",
 		Disk:      "17G used / 61G (28%)",
-		TopProcs:  "systemd(13.8%) azure-proxy-agent(8.2%) containerd(5.1%) shim(3.0%) sshd(2.1%)",
+		TopProcs:  "systemd(13.8%) demo-agent(8.2%) containerd(5.1%) shim(3.0%) sshd(2.1%)",
 		Conns:     "1",
 		FetchedAt: time.Now(),
 	}
 	rendered := joinPreview(previewModel(t, snap, false, 140, 30))
 
 	wants := []string{
-		"▎ estha-en-dify",
+		"▎ demo-api",
 		"● live",
-		"azureuser@4.194.92.132:22",
-		"~/.ssh/estha-en-dify.pem",
+		"demo@192.0.2.12:22",
+		"~/.ssh/demo-api.pem",
 		"╭",
 		"│ Source",
 		"╰",
@@ -114,12 +114,12 @@ func TestPreviewLiveSnapshotCollapsed(t *testing.T) {
 			t.Errorf("expected substring %q in preview:\n%s", w, rendered)
 		}
 	}
-	if strings.Contains(rendered, "~/.ssh/estha-en-dify.pem\n\n  ╭") {
+	if strings.Contains(rendered, "~/.ssh/demo-api.pem\n\n  ╭") {
 		t.Errorf("history/source block should not be separated from identity by a blank line:\n%s", rendered)
 	}
 	// Top1 + 1 line, no full top-5 unless expanded
-	if strings.Contains(rendered, "azure-proxy-agent") {
-		t.Errorf("collapsed preview should not list azure-proxy-agent, got:\n%s", rendered)
+	if strings.Contains(rendered, "demo-agent") {
+		t.Errorf("collapsed preview should not list demo-agent, got:\n%s", rendered)
 	}
 	// No raw section unless expanded
 	if strings.Contains(rendered, "Raw config") {
@@ -133,23 +133,23 @@ func TestPreviewExpandedShowsAllProcsAndRaw(t *testing.T) {
 		Load:      "0.18, 0.25, 0.21",
 		Mem:       "4451/15944 MB (28%)",
 		Disk:      "17G used / 61G (28%)",
-		TopProcs:  "systemd(13.8%) azure-proxy-agent(8.2%) containerd(5.1%) shim(3.0%) sshd(2.1%)",
+		TopProcs:  "systemd(13.8%) demo-agent(8.2%) containerd(5.1%) shim(3.0%) sshd(2.1%)",
 		Conns:     "1",
 		FetchedAt: time.Now(),
 	}
 	t.Helper()
 	entry := sshconfig.HostEntry{
-		Alias:        "estha-en-dify",
-		HostName:     "4.194.92.132",
+		Alias:        "demo-api",
+		HostName:     "192.0.2.12",
 		Port:         "22",
-		User:         "azureuser",
-		IdentityFile: "~/.ssh/estha-en-dify.pem",
-		SourceFile:   "/Users/dong/.ssh/config",
+		User:         "demo",
+		IdentityFile: "~/.ssh/demo-api.pem",
+		SourceFile:   "~/.ssh/config",
 		SourceLine:   148,
 		RawBlock: strings.Join([]string{
-			"Host estha-en-dify",
-			"    HostName 4.194.92.132",
-			"    User azureuser",
+			"Host demo-api",
+			"    HostName 192.0.2.12",
+			"    User demo",
 		}, "\n"),
 	}
 	cache := monitor.NewCache(30*time.Second, 5*time.Second)
@@ -161,7 +161,7 @@ func TestPreviewExpandedShowsAllProcsAndRaw(t *testing.T) {
 	_, right := model.splitColumns()
 	rendered := joinPreview(model.previewLines(40, right))
 
-	for _, w := range []string{"systemd", "azure-proxy-agent", "containerd", "shim", "sshd"} {
+	for _, w := range []string{"systemd", "demo-agent", "containerd", "shim", "sshd"} {
 		if !strings.Contains(rendered, w) {
 			t.Errorf("expanded preview missing %q:\n%s", w, rendered)
 		}
@@ -172,7 +172,7 @@ func TestPreviewExpandedShowsAllProcsAndRaw(t *testing.T) {
 	if !strings.Contains(rendered, "┃ Raw config") {
 		t.Errorf("expanded preview should include Raw config section:\n%s", rendered)
 	}
-	if !strings.Contains(rendered, "Host estha-en-dify") {
+	if !strings.Contains(rendered, "Host demo-api") {
 		t.Errorf("Raw config body missing:\n%s", rendered)
 	}
 }
@@ -182,15 +182,15 @@ func TestPreviewStaleSnapshotShowsAmberHeader(t *testing.T) {
 	now := time.Now()
 	cache.SetClock(func() time.Time { return now })
 	cache.Put(&monitor.Snapshot{
-		Alias:     "estha-en-dify",
+		Alias:     "demo-api",
 		FetchedAt: now.Add(-2 * time.Minute),
 		Uptime:    "up 1 day",
 		Mem:       "8000/16000 MB (50%)",
 		Disk:      "30G used / 60G (50%)",
 	})
 	entry := sshconfig.HostEntry{
-		Alias:    "estha-en-dify",
-		HostName: "1.2.3.4",
+		Alias:    "demo-api",
+		HostName: "192.0.2.34",
 		User:     "ubuntu",
 	}
 	model := NewModel(Config{Entries: []sshconfig.HostEntry{entry}, Monitor: cache, MonitorVisible: true})
@@ -209,13 +209,13 @@ func TestPreviewStaleSnapshotShowsAmberHeader(t *testing.T) {
 func TestPreviewDeadSnapshotShowsErrorBody(t *testing.T) {
 	cache := monitor.NewCache(30*time.Second, 5*time.Second)
 	cache.Put(&monitor.Snapshot{
-		Alias:     "estha-en-dify",
+		Alias:     "demo-api",
 		FetchedAt: time.Now(),
 		Err:       errors.New("ssh: connect: connection refused"),
 	})
 	entry := sshconfig.HostEntry{
-		Alias:    "estha-en-dify",
-		HostName: "1.2.3.4",
+		Alias:    "demo-api",
+		HostName: "192.0.2.34",
 	}
 	model := NewModel(Config{Entries: []sshconfig.HostEntry{entry}, Monitor: cache, MonitorVisible: true})
 	model, _ = model.update(tea.WindowSizeMsg{Width: 120, Height: 30})
@@ -236,8 +236,8 @@ func TestPreviewDeadSnapshotShowsErrorBody(t *testing.T) {
 func TestPreviewLoadingStateShowsProbing(t *testing.T) {
 	cache := monitor.NewCache(30*time.Second, 5*time.Second)
 	entry := sshconfig.HostEntry{
-		Alias:    "estha-en-dify",
-		HostName: "1.2.3.4",
+		Alias:    "demo-api",
+		HostName: "192.0.2.34",
 	}
 	model := NewModel(Config{Entries: []sshconfig.HostEntry{entry}, Monitor: cache, MonitorVisible: true})
 	model, _ = model.update(tea.WindowSizeMsg{Width: 120, Height: 30})
@@ -254,8 +254,8 @@ func TestPreviewLoadingStateShowsProbing(t *testing.T) {
 
 func TestPreviewWithoutMonitorOmitsHealthSection(t *testing.T) {
 	entry := sshconfig.HostEntry{
-		Alias:    "estha-en-dify",
-		HostName: "1.2.3.4",
+		Alias:    "demo-api",
+		HostName: "192.0.2.34",
 		User:     "ubuntu",
 	}
 	model := NewModel(Config{Entries: []sshconfig.HostEntry{entry}})
@@ -280,7 +280,7 @@ func TestPreviewWidthIsRespected(t *testing.T) {
 		Load:     "0.18, 0.25, 0.21",
 		Mem:      "4451/15944 MB (28%)",
 		Disk:     "17G used / 61G (28%)",
-		TopProcs: "systemd(13.8%) azure-proxy-agent(8.2%)",
+		TopProcs: "systemd(13.8%) demo-agent(8.2%)",
 		Conns:    "1",
 	}
 	for _, width := range []int{80, 100, 140} {

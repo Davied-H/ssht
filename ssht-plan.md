@@ -115,7 +115,7 @@ ssht:<sanitized-host-alias>
 例如：
 
 - `prod-api` -> `ssht:prod-api`
-- `root@10.0.0.1` -> `ssht:root-10-0-0-1`
+- `root@192.0.2.1` -> `ssht:root-192-0-2-1`
 
 命令策略：
 
@@ -140,7 +140,7 @@ ssht:<sanitized-host-alias>
 ┌──────────────────────────────────────────────┐
 │ Search: prod                                 │
 ├───────────────────────┬──────────────────────┤
-│ > prod-api            │ HostName: 10.0.1.12   │
+│ > prod-api            │ HostName: 192.0.2.12   │
 │   prod-db             │ User: deploy          │
 │   staging-api         │ Port: 22              │
 │   jump-box            │ ProxyJump: bastion    │
@@ -281,4 +281,3 @@ tmux has-session -t ssht:prod-api
 - 是否支持最近连接排序：建议第一版用字母排序，后续再加本地状态文件。
 - 是否支持分组：第一版可从 Host 前缀推断简单分组，例如 `prod-*`，不引入配置文件。
 - 是否支持保存用户偏好：第一版不保存，避免状态复杂化。
-

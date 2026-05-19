@@ -9,16 +9,16 @@ import (
 
 const sampleSingleFile = `# ssht: group=prod tags=api,critical
 Host prod-api-01
-    HostName 10.0.1.12
+    HostName 192.0.2.12
     User deploy
 
 # ssht: group=prod
 Host prod-db-01
-    HostName 10.0.1.20
+    HostName 192.0.2.20
 
 # ssht: group=dev
 Host dev-box
-    HostName 192.168.1.50
+    HostName 192.0.2.50
 `
 
 func writeTemp(t *testing.T, content string) string {
@@ -79,8 +79,8 @@ func TestRenameGroupSingleFileRewritesAllReferences(t *testing.T) {
 }
 
 func TestRenameGroupMultiFile(t *testing.T) {
-	a := writeTemp(t, "# ssht: group=prod\nHost a\n    HostName 1.1.1.1\n")
-	b := writeTemp(t, "# ssht: group=prod tags=db\nHost b\n    HostName 2.2.2.2\n")
+	a := writeTemp(t, "# ssht: group=prod\nHost a\n    HostName 192.0.2.11\n")
+	b := writeTemp(t, "# ssht: group=prod tags=db\nHost b\n    HostName 192.0.2.22\n")
 
 	res, err := RenameGroup([]string{a, b}, "prod", "production")
 	if err != nil {
@@ -104,7 +104,7 @@ func TestRenameGroupMultiFile(t *testing.T) {
 }
 
 func TestRenameGroupPreservesHiddenMetadata(t *testing.T) {
-	path := writeTemp(t, "# ssht: group=prod hidden=true tags=db\nHost hidden-db\n    HostName 1.1.1.1\n")
+	path := writeTemp(t, "# ssht: group=prod hidden=true tags=db\nHost hidden-db\n    HostName 192.0.2.11\n")
 
 	res, err := RenameGroup([]string{path}, "prod", "production")
 	if err != nil {
@@ -122,15 +122,15 @@ func TestRenameGroupPreservesHiddenMetadata(t *testing.T) {
 func TestMergeGroupCollisionsResolved(t *testing.T) {
 	path := writeTemp(t, `# ssht: group=staging
 Host stg-a
-    HostName 1.1.1.1
+    HostName 192.0.2.11
 
 # ssht: group=dev
 Host dev-a
-    HostName 2.2.2.2
+    HostName 192.0.2.22
 
 # ssht: group=staging tags=api
 Host stg-b
-    HostName 3.3.3.3
+    HostName 192.0.2.33
 `)
 
 	res, err := MergeGroup([]string{path}, "staging", "dev")
@@ -156,11 +156,11 @@ Host stg-b
 func TestDeleteGroupStripsCommentLineWhenOnlyGroupPresent(t *testing.T) {
 	path := writeTemp(t, `# ssht: group=lab
 Host lab-a
-    HostName 1.1.1.1
+    HostName 192.0.2.11
 
 # ssht: group=lab tags=experimental
 Host lab-b
-    HostName 2.2.2.2
+    HostName 192.0.2.22
 `)
 
 	res, err := DeleteGroup([]string{path}, "lab")
@@ -207,7 +207,7 @@ func TestDeleteGroupRejectsReservedNames(t *testing.T) {
 }
 
 func TestRenameGroupIsNoopWhenSameName(t *testing.T) {
-	path := writeTemp(t, "# ssht: group=prod\nHost a\n    HostName 1.1.1.1\n")
+	path := writeTemp(t, "# ssht: group=prod\nHost a\n    HostName 192.0.2.11\n")
 	original := readFileGW(t, path)
 	res, err := RenameGroup([]string{path}, "prod", "prod")
 	if err != nil {
@@ -222,7 +222,7 @@ func TestRenameGroupIsNoopWhenSameName(t *testing.T) {
 }
 
 func TestMoveHostsToGroupAddsNewMetadataComment(t *testing.T) {
-	path := writeTemp(t, "Host orphan\n    HostName 1.1.1.1\n")
+	path := writeTemp(t, "Host orphan\n    HostName 192.0.2.11\n")
 	entries, _, err := ParseFile(path, Options{NoInclude: true})
 	if err != nil {
 		t.Fatal(err)
@@ -244,7 +244,7 @@ func TestMoveHostsToGroupAddsNewMetadataComment(t *testing.T) {
 }
 
 func TestMoveHostsToGroupReplacesExistingGroupKeepingTags(t *testing.T) {
-	path := writeTemp(t, "# ssht: group=staging tags=api\nHost api-1\n    HostName 1.1.1.1\n")
+	path := writeTemp(t, "# ssht: group=staging tags=api\nHost api-1\n    HostName 192.0.2.11\n")
 	entries, _, err := ParseFile(path, Options{NoInclude: true})
 	if err != nil {
 		t.Fatal(err)
@@ -262,7 +262,7 @@ func TestMoveHostsToGroupReplacesExistingGroupKeepingTags(t *testing.T) {
 }
 
 func TestMoveHostsToGroupEmptyTargetMovesToUngrouped(t *testing.T) {
-	path := writeTemp(t, "# ssht: group=staging\nHost api-1\n    HostName 1.1.1.1\n")
+	path := writeTemp(t, "# ssht: group=staging\nHost api-1\n    HostName 192.0.2.11\n")
 	entries, _, err := ParseFile(path, Options{NoInclude: true})
 	if err != nil {
 		t.Fatal(err)

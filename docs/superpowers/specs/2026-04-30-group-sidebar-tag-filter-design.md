@@ -13,7 +13,7 @@ Add a left group sidebar to `ssht` so users can browse hosts by a primary group,
 ```sshconfig
 # ssht: group=prod tags=api,critical
 Host prod-api-01
-    HostName 10.0.1.12
+    HostName 192.0.2.12
     User deploy
 ```
 

@@ -29,7 +29,7 @@
 ┌─────────────────────────────────────────────────────────────┐
 │ ssht  Hosts 24  Matched 8  ★ 5  ⏱ 7  ✓ 2  ⚠ 1              │
 ├─ Groups ───┬─ Hosts ───────────────┬─ Preview ──────────────┤
-│ all     24 │ > prod-api-01         │ HostName 10.0.1.12     │
+│ all     24 │ > prod-api-01         │ HostName 192.0.2.12     │
 │ ▸ prod   8 │   prod-api-02         │ User     deploy        │
 │   dev    5 │   prod-db-01          │ Port     22            │
 │   stage  3 │   ...                 │ Source   ~/.ssh/config │

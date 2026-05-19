@@ -157,8 +157,8 @@ func TestPreviewPaneCanBeCollapsedFromSidebarFocus(t *testing.T) {
 
 func TestBrowseViewRendersProfessionalStructureOnWideTerminal(t *testing.T) {
 	entries := []sshconfig.HostEntry{
-		{Alias: "prod-api", Group: "prod", HostName: "10.0.1.12", User: "deploy"},
-		{Alias: "dev-db", Group: "dev", HostName: "10.0.2.10", User: "root"},
+		{Alias: "prod-api", Group: "prod", HostName: "192.0.2.12", User: "deploy"},
+		{Alias: "dev-db", Group: "dev", HostName: "192.0.2.20", User: "root"},
 	}
 	model := newWideModel(t, entries, state.NewStore())
 
@@ -172,7 +172,7 @@ func TestBrowseViewRendersProfessionalStructureOnWideTerminal(t *testing.T) {
 
 func TestBrowseViewPinsFooterToBottom(t *testing.T) {
 	entries := []sshconfig.HostEntry{
-		{Alias: "prod-api", Group: "prod", HostName: "10.0.1.12", User: "deploy"},
+		{Alias: "prod-api", Group: "prod", HostName: "192.0.2.12", User: "deploy"},
 	}
 	model := NewModel(Config{Entries: entries})
 	model, _ = model.update(tea.WindowSizeMsg{Width: 120, Height: 24})
@@ -194,13 +194,13 @@ func TestBrowseViewWidthIsRespectedAcrossBreakpoints(t *testing.T) {
 		{
 			Alias:        "prod-api-node-with-a-very-long-name",
 			Group:        "production-east-with-long-name",
-			HostName:     "10.0.1.12",
+			HostName:     "192.0.2.12",
 			User:         "deploy-user-with-a-long-name",
 			IdentityFile: "~/.ssh/a-very-long-identity-file-name.pem",
 			SourceFile:   "/Users/example/.ssh/config",
 			SourceLine:   42,
 		},
-		{Alias: "dev-db", Group: "dev", HostName: "10.0.2.10", User: "root"},
+		{Alias: "dev-db", Group: "dev", HostName: "192.0.2.20", User: "root"},
 	}
 	for _, width := range []int{72, 80, 96, 120, 140} {
 		model := NewModel(Config{Entries: entries})

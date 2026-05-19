@@ -10,7 +10,7 @@ import (
 func TestAddHostWritesBlockAndBackup(t *testing.T) {
 	path := writeTempConfig(t, `
 Host existing
-    HostName 10.0.0.1
+    HostName 192.0.2.1
 `)
 
 	err := AddHost(path, HostForm{

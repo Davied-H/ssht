@@ -26,7 +26,7 @@ Host staging-api !blocked *.wild
 Include included.conf
 
 Host prod-api prod-api.internal
-    HostName 10.0.1.12
+    HostName 192.0.2.12
     User deploy
     IdentityFile ~/.ssh/prod
 
@@ -69,7 +69,7 @@ Host *.internal
 	}
 
 	prod := entries[1]
-	if prod.HostName != "10.0.1.12" || prod.IdentityFile != "~/.ssh/prod" {
+	if prod.HostName != "192.0.2.12" || prod.IdentityFile != "~/.ssh/prod" {
 		t.Fatalf("prod fields not parsed: %#v", prod)
 	}
 }
@@ -93,7 +93,7 @@ func TestParseSshtMetadataCommentAddsGroupAndTags(t *testing.T) {
 # unrelated comment
 # ssht: group=prod tags=api,critical
 Host prod-api
-    HostName 10.0.1.12
+    HostName 192.0.2.12
 
 # ssht: group=dev
 Host dev-box
@@ -162,10 +162,10 @@ func TestParseSshpassCommentAddsPasswordToNextHost(t *testing.T) {
 	if err := os.WriteFile(path, []byte(`
 # sshpass 密码: p@ss word
 Host password-host
-    HostName 10.0.1.12
+    HostName 192.0.2.12
 
 Host key-host
-    HostName 10.0.1.13
+    HostName 192.0.2.13
 `), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -194,7 +194,7 @@ func TestParseAdjacentSshpassAndSshtMetadataCombinesBoth(t *testing.T) {
 # sshpass 密码: p@ss word
 # ssht: group=prod tags=api,critical
 Host password-host
-    HostName 10.0.1.12
+    HostName 192.0.2.12
 `), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -225,11 +225,11 @@ func TestParseRawBlockDoesNotIncludeNextHostSSHPasswordComment(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "config")
 	if err := os.WriteFile(path, []byte(`
 Host key-host
-    HostName 10.0.1.13
+    HostName 192.0.2.13
 
 # sshpass 密码: secret
 Host password-host
-    HostName 10.0.1.12
+    HostName 192.0.2.12
 `), 0o600); err != nil {
 		t.Fatal(err)
 	}

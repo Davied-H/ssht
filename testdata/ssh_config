@@ -1,11 +1,11 @@
 Include included.conf
 
 Host prod-api prod-api.internal
-    HostName 10.0.1.12
+    HostName 192.0.2.12
     User deploy
 
 Host prod-db
-    HostName 10.0.1.13
+    HostName 192.0.2.13
 
 Host jump-box
     ProxyJump bastion

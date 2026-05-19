@@ -29,8 +29,8 @@ func typeSearch(model Model, query string) Model {
 
 func TestModelFiltersAndReloadsHosts(t *testing.T) {
 	entries := []sshconfig.HostEntry{
-		{Alias: "prod-api", HostName: "10.0.1.12"},
-		{Alias: "prod-db", HostName: "10.0.1.13"},
+		{Alias: "prod-api", HostName: "192.0.2.12"},
+		{Alias: "prod-db", HostName: "192.0.2.13"},
 		{Alias: "staging-api", HostName: "staging.example.com"},
 	}
 	model := NewModel(Config{Entries: entries})
@@ -200,8 +200,8 @@ func TestConnectStatusIncludesTabOpenMode(t *testing.T) {
 
 func TestDashboardCountsHostsMatchesAndWarnings(t *testing.T) {
 	entries := []sshconfig.HostEntry{
-		{Alias: "prod-api", HostName: "10.0.1.12"},
-		{Alias: "prod-db", HostName: "10.0.1.13"},
+		{Alias: "prod-api", HostName: "192.0.2.12"},
+		{Alias: "prod-db", HostName: "192.0.2.13"},
 		{Alias: "staging-api", HostName: "staging.example.com"},
 	}
 	model := NewModel(Config{
@@ -898,7 +898,7 @@ func TestBrowseViewFitsWindowHeight(t *testing.T) {
 	for i := 0; i < 20; i++ {
 		entries = append(entries, sshconfig.HostEntry{
 			Alias:        fmt.Sprintf("prod-api-node-with-a-very-long-name-%02d", i),
-			HostName:     fmt.Sprintf("10.0.0.%d", i+1),
+			HostName:     fmt.Sprintf("192.0.2.%d", i+1),
 			User:         "deploy-user-with-a-long-name",
 			IdentityFile: "~/.ssh/a-very-long-identity-file-name.pem",
 			ProxyJump:    "jump-host-with-a-long-name",
@@ -906,7 +906,7 @@ func TestBrowseViewFitsWindowHeight(t *testing.T) {
 			SourceLine:   i + 1,
 			RawBlock: strings.Join([]string{
 				"Host prod-api-node-with-a-very-long-name",
-				"    HostName 10.0.0.1",
+				"    HostName 192.0.2.1",
 				"    User deploy-user-with-a-long-name",
 				"    IdentityFile ~/.ssh/a-very-long-identity-file-name.pem",
 				"    ProxyJump jump-host-with-a-long-name",

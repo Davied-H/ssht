@@ -1,5 +1,7 @@
 # ssht
 
+![ssht terminal UI preview](assets/ssht-hero.png)
+
 `ssht` 是一个本地 TUI 工具，用来从 OpenSSH config 中浏览并打开 SSH
 主机。
 
@@ -121,7 +123,7 @@ Hosts 24 | Matched 8 | Favorites 5 | Recent 7 | Selected 2 | Warnings 1
 ```sshconfig
 # ssht: group=prod tags=api,critical
 Host prod-api-01
-    HostName 10.0.1.12
+    HostName 192.0.2.12
     User deploy
 ```
 
@@ -217,7 +219,7 @@ Host github.com
 ```sshconfig
 # sshpass 密码: example-password
 Host password-host
-    HostName 10.0.1.12
+    HostName 192.0.2.12
     User root
 ```
 
