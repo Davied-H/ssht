@@ -12,14 +12,64 @@
 
 ## 安装
 
+推荐从 GitHub Release 一键安装，不需要本机安装 Go：
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/Davied-H/ssht/main/scripts/install-release.sh | sh
+```
+
+默认安装到 `~/.local/bin/ssht`。指定安装目录：
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/Davied-H/ssht/main/scripts/install-release.sh | INSTALL_DIR=/usr/local/bin sh
+```
+
+安装指定版本：
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/Davied-H/ssht/main/scripts/install-release.sh | SSHT_VERSION=v0.1.0 sh
+```
+
+如果你已经 clone 了仓库，也可以直接运行：
+
+```bash
+sh scripts/install-release.sh
+```
+
+仓库仍为私有时，`raw.githubusercontent.com` 的一键命令需要你自己带 GitHub 鉴权；
+更直接的方式是先 clone 仓库，然后运行上面的本地脚本。
+
+源码构建安装需要 Go：
+
 ```bash
 ./install.sh
 ```
 
-默认情况下，安装脚本会把 `ssht` 安装到 `~/.local/bin`。如果要指定其他目录：
+源码安装脚本同样默认安装到 `~/.local/bin`。如果要指定其他目录：
 
 ```bash
 INSTALL_DIR=/usr/local/bin ./install.sh
+```
+
+## Codex / Claude Code 一键配置
+
+本仓库带有给 Codex 和 Claude Code 看的项目说明，以及三个配套 Codex skills：
+
+- `ssht-config-auditor`：审查 SSH config 示例、`# ssht:` 元数据和公开前敏感信息。
+- `ssht-release-packager`：处理 release、tag、安装脚本和跨平台包验证。
+- `ssht-raycast-helper`：维护 Raycast extension、偏好项和连接动作。
+
+一键安装这些 agent 配置和 skills：
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/Davied-H/ssht/main/scripts/configure-agents.sh | sh
+```
+
+在本地仓库内，Codex 会读取 `AGENTS.md`，Claude Code 会读取 `CLAUDE.md`。如果你想让
+Codex 在其他会话中也能使用这些 skills，可以在 clone 后运行：
+
+```bash
+sh scripts/configure-agents.sh
 ```
 
 ## GitHub 发布
