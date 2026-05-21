@@ -272,7 +272,11 @@ func (m Model) browseLines(maxHeight int) []string {
 		return append(lines, "  "+mutedStyle.Render("No SSH Host entries found. Check "+m.configPath))
 	}
 	if len(m.filtered) == 0 {
-		return append(lines, "  "+mutedStyle.Render("No hosts match the current filter."))
+		query := strings.TrimSpace(m.filter)
+		if query == "" {
+			return append(lines, "  "+mutedStyle.Render("No hosts match the current filter."))
+		}
+		return append(lines, "  "+mutedStyle.Render(fmt.Sprintf("No hosts match %q. Press Ctrl+U in search to clear.", query)))
 	}
 
 	sidebarWidth, listWidth, previewWidth := m.splitThreeColumns()
@@ -410,13 +414,13 @@ func (m Model) filterLine() string {
 		if value == "" {
 			value = mutedStyle.Render("tag:<name> · fav: · recent:")
 		}
-		return accentStyle.Render("▎ ") + prompt + value + selectedStyle.Render("▏") + dimStyle.Render("  Enter/Esc done")
+		return accentStyle.Render("▎ ") + prompt + value + selectedStyle.Render("▏") + dimStyle.Render("  editing current filter · Ctrl+U clear · Enter/Esc done")
 	}
 	prompt := accentStyle.Render("/ search ")
 	if m.filter == "" {
 		return prompt + mutedStyle.Render("shortcuts active · tag:<name> · fav: · recent:")
 	}
-	return prompt + m.filter + dimStyle.Render("  matched")
+	return prompt + m.filter + dimStyle.Render("  / edit · Ctrl+U clear in search")
 }
 
 func (m Model) splitColumns() (left, right int) {
@@ -872,7 +876,8 @@ func (m Model) helpView() string {
 	return strings.Join([]string{
 		titleStyle.Render("ssht help"),
 		"",
-		"/      Enter search mode. Typing filters only while search mode is active.",
+		"/      Enter search mode and edit the current filter.",
+		"Ctrl+U Clear the filter while search mode is active.",
 		"Enter  Open the selected host using the configured terminal mode.",
 		"Space  Mark or unmark a host for batch connect across filters/groups.",
 		"f      Toggle favorite for the selected host.",

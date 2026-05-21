@@ -472,7 +472,6 @@ func (m Model) handleKey(key tea.KeyMsg) (Model, tea.Cmd) {
 func (m Model) startSearch() Model {
 	m.focus = focusList
 	m.searchActive = true
-	m.filter = ""
 	m.cursor = 0
 	m.status = ""
 	m.applyFilter()
@@ -498,11 +497,7 @@ func (m Model) handleSearchKey(key tea.KeyMsg) (Model, tea.Cmd) {
 		m.cursor = 0
 		m.applyFilter()
 	case tea.KeyRunes:
-		if key.String() == "/" {
-			m.filter = ""
-		} else {
-			m.filter += key.String()
-		}
+		m.filter += key.String()
 		m.cursor = 0
 		m.applyFilter()
 	}
@@ -1395,8 +1390,24 @@ func (m Model) matchRank(entry sshconfig.HostEntry) int {
 	if len(terms) == 0 {
 		return 0
 	}
+	score := 0
+	for _, term := range terms {
+		score += searchTermRank(entry, term)
+	}
+	return score
+}
+
+func searchTermRank(entry sshconfig.HostEntry, term string) int {
 	alias := strings.ToLower(entry.Alias)
-	host := strings.ToLower(entry.HostName)
+	group := strings.ToLower(entry.Group)
+	tags := strings.ToLower(strings.Join(entry.Tags, " "))
+	hostFields := strings.ToLower(strings.Join([]string{
+		entry.HostName,
+		entry.User,
+		entry.Port,
+		entry.ProxyJump,
+		entry.SourceFile,
+	}, " "))
 	haystack := strings.ToLower(strings.Join([]string{
 		entry.Alias,
 		entry.Group,
@@ -1408,26 +1419,24 @@ func (m Model) matchRank(entry sshconfig.HostEntry) int {
 		strings.Join(entry.Tags, " "),
 	}, " "))
 
-	score := 0
-	for _, term := range terms {
-		switch {
-		case alias == term:
-			score += 0
-		case strings.HasPrefix(alias, term):
-			score += 1
-		case strings.Contains(alias, term):
-			score += 2
-		case strings.Contains(host, term):
-			score += 3
-		case fuzzyContains(alias, term):
-			score += 4
-		case strings.Contains(haystack, term):
-			score += 5
-		default:
-			score += 6
-		}
+	switch {
+	case alias == term:
+		return 0
+	case strings.HasPrefix(alias, term):
+		return 1
+	case strings.Contains(alias, term):
+		return 2
+	case strings.Contains(group, term) || strings.Contains(tags, term):
+		return 3
+	case strings.Contains(hostFields, term):
+		return 4
+	case fuzzyContains(alias, term):
+		return 5
+	case fuzzyContains(haystack, term):
+		return 6
+	default:
+		return 7
 	}
-	return score
 }
 
 func textSearchTerms(query string) []string {

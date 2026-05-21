@@ -11,6 +11,7 @@ Use these notes when working on this repository.
 ```bash
 go test ./...
 go build -trimpath -ldflags="-s -w" -o /tmp/ssht ./cmd/ssht
+sh scripts/preflight-release.sh
 ```
 
 For release-install testing:

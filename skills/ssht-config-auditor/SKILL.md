@@ -10,10 +10,9 @@ Use this skill when the task involves SSH config fixtures, README examples, priv
 ## Workflow
 
 1. Inspect only repository files unless the user explicitly provides a real SSH config path.
-2. Search for sensitive values before publishing:
+2. Run the repository preflight before publishing:
    ```bash
-   rg -n --hidden -g '!raycast/node_modules/**' -g '!.git/**' \
-     '(BEGIN .*PRIVATE KEY|IdentityFile|sshpass|password|HostName|/Users/|[0-9]{1,3}(\\.[0-9]{1,3}){3})'
+   sh scripts/preflight-release.sh
    ```
 3. Replace real-looking examples with documentation-safe values:
    - IPs: `192.0.2.0/24`, `198.51.100.0/24`, or `203.0.113.0/24`
@@ -34,7 +33,7 @@ Use this skill when the task involves SSH config fixtures, README examples, priv
 Run:
 
 ```bash
-go test ./...
+sh scripts/preflight-release.sh
 ```
 
 For parser/writer changes, make sure affected tests under `internal/sshconfig` cover the new behavior.

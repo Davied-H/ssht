@@ -1029,7 +1029,7 @@ Host prod
 	}
 }
 
-func TestSlashEntersSearchModeAndClearsPreviousFilter(t *testing.T) {
+func TestSlashEntersSearchModeAndKeepsPreviousFilter(t *testing.T) {
 	model := NewModel(Config{Entries: []sshconfig.HostEntry{
 		{Alias: "prod-api"},
 		{Alias: "dev-db"},
@@ -1041,8 +1041,27 @@ func TestSlashEntersSearchModeAndClearsPreviousFilter(t *testing.T) {
 	model, _ = model.update(tea.KeyMsg{Type: tea.KeyEnter})
 
 	model, _ = model.update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("/")})
+	if !model.searchActive {
+		t.Fatalf("slash should enter search mode")
+	}
+	if model.Filter() != "prod" {
+		t.Fatalf("slash should keep filter for editing, got %q", model.Filter())
+	}
+	if got := len(model.FilteredEntries()); got != 1 {
+		t.Fatalf("filtered count = %d, want 1", got)
+	}
+}
+
+func TestCtrlUClearSearchFilter(t *testing.T) {
+	model := NewModel(Config{Entries: []sshconfig.HostEntry{
+		{Alias: "prod-api"},
+		{Alias: "dev-db"},
+	}})
+	model = typeSearch(model, "prod")
+
+	model, _ = model.update(tea.KeyMsg{Type: tea.KeyCtrlU})
 	if model.Filter() != "" {
-		t.Fatalf("slash should clear filter, got %q", model.Filter())
+		t.Fatalf("ctrl+u should clear filter, got %q", model.Filter())
 	}
 	if got := len(model.FilteredEntries()); got != 2 {
 		t.Fatalf("filtered count = %d, want 2", got)
@@ -1059,6 +1078,23 @@ func TestModelFuzzyFiltersHostAliases(t *testing.T) {
 	filtered := model.FilteredEntries()
 	if len(filtered) != 1 || filtered[0].Alias != "prod-api" {
 		t.Fatalf("fuzzy filtered = %#v, want prod-api", filtered)
+	}
+}
+
+func TestModelRanksAliasMatchesBeforeFieldAndFuzzyMatches(t *testing.T) {
+	model := NewModel(Config{Entries: []sshconfig.HostEntry{
+		{Alias: "xpa-host", Tags: []string{"api"}},
+		{Alias: "api-prod"},
+		{Alias: "prod-api"},
+		{Alias: "web", Group: "api"},
+		{Alias: "host-field", HostName: "api.example.com"},
+		{Alias: "a-p-i-fuzzy"},
+	}})
+
+	model = typeSearch(model, "api")
+
+	if got := aliases(model.FilteredEntries()); strings.Join(got, ",") != "api-prod,prod-api,web,xpa-host,host-field,a-p-i-fuzzy" {
+		t.Fatalf("aliases = %v, want alias exact/prefix/contains before tag/group, host fields, and fuzzy", got)
 	}
 }
 

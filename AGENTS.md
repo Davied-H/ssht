@@ -14,6 +14,7 @@ These instructions are for Codex and other code agents working in this repositor
 ```bash
 go test ./...
 go build -trimpath -ldflags="-s -w" -o /tmp/ssht ./cmd/ssht
+sh scripts/preflight-release.sh
 ./install.sh
 sh scripts/install-release.sh
 ```

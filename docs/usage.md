@@ -55,8 +55,8 @@ SSHT_OPEN_MODE=tab ssht
 
 ## 快捷键
 
-- 直接输入文字：筛选主机
-- `/`：清空筛选
+- `/`：进入搜索并编辑当前筛选
+- `Ctrl+U`：在搜索中清空筛选
 - `tag:<name>`：按标签筛选
 - `fav:`：只显示收藏主机
 - `recent:`：只显示最近连接主机
@@ -124,8 +124,8 @@ Host prod-api-01
 
 ```sshconfig
 # ssht: hidden=true
-Host github.com
-    HostName github.com
+Host git-example
+    HostName git.example.com
     User git
 ```
 
@@ -233,15 +233,20 @@ Release workflow 构建：
 
 ## 公开前检查
 
-发布前建议检查：
+发布前运行仓库内置 preflight：
 
 ```bash
-go test ./...
-rg -n --hidden -g '!raycast/node_modules/**' -g '!.git/**' \
-  '(BEGIN .*PRIVATE KEY|github_pat|gho_|AKIA[0-9A-Z]{16}|/Users/|sshpass|password)'
+sh scripts/preflight-release.sh
 ```
 
-文档和测试示例优先使用：
+这条命令会检查：
+
+- Go 测试：`go test ./...`
+- 敏感信息：私钥、常见 token、云密钥、个人绝对路径
+- README 和 usage 示例：IP 必须使用 RFC 5737 文档网段，HostName 域名必须使用 `example.com`
+- Release 产物命名：workflow、安装脚本和本文档中的命名规则必须一致
+
+文档和测试示例使用：
 
 - IP：`192.0.2.0/24`、`198.51.100.0/24`、`203.0.113.0/24`
 - 域名：`example.com`

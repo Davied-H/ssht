@@ -46,7 +46,8 @@ ssht --connect prod-api-01
 
 常用键：
 
-- 输入文字：筛选主机
+- `/`：进入搜索并编辑当前筛选
+- `Ctrl+U`：在搜索中清空筛选
 - `Enter`：打开选中主机
 - `Space`：标记主机，批量打开
 - `[` / `]`：切换分组
@@ -78,6 +79,13 @@ tag:api fav:
 - [Codex / Claude Code 配置](docs/usage.md#codex--claude-code)
 - [Raycast 扩展](docs/usage.md#raycast-扩展)
 - [发布和打包](docs/usage.md#发布和打包)
+- [公开前检查](docs/usage.md#公开前检查)
+
+打 tag 前跑一条仓库内命令：
+
+```bash
+sh scripts/preflight-release.sh
+```
 
 ## Agent 配置
 

@@ -170,6 +170,46 @@ func TestBrowseViewRendersProfessionalStructureOnWideTerminal(t *testing.T) {
 	}
 }
 
+func TestSearchViewShowsEditAndClearHints(t *testing.T) {
+	model := newWideModel(t, []sshconfig.HostEntry{
+		{Alias: "prod-api", Group: "prod"},
+	}, state.NewStore())
+	model = typeSearch(model, "prod")
+
+	view := stripANSI(model.View())
+	for _, want := range []string{"SEARCH prod", "editing current filter", "Ctrl+U clear", "Enter/Esc done"} {
+		if !strings.Contains(view, want) {
+			t.Fatalf("search view missing %q:\n%s", want, view)
+		}
+	}
+}
+
+func TestBrowseViewShowsNoResultsQueryAndClearHint(t *testing.T) {
+	model := newWideModel(t, []sshconfig.HostEntry{
+		{Alias: "prod-api", Group: "prod"},
+	}, state.NewStore())
+	model = typeSearch(model, "missing")
+
+	view := stripANSI(model.View())
+	for _, want := range []string{`No hosts match "missing"`, "Press Ctrl+U in search to clear"} {
+		if !strings.Contains(view, want) {
+			t.Fatalf("no results view missing %q:\n%s", want, view)
+		}
+	}
+}
+
+func TestHelpViewDocumentsSearchClearShortcut(t *testing.T) {
+	model := NewModel(Config{})
+	model, _ = model.update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("?")})
+
+	view := stripANSI(model.View())
+	for _, want := range []string{"/      Enter search mode and edit the current filter.", "Ctrl+U Clear the filter while search mode is active."} {
+		if !strings.Contains(view, want) {
+			t.Fatalf("help view missing %q:\n%s", want, view)
+		}
+	}
+}
+
 func TestBrowseViewPinsFooterToBottom(t *testing.T) {
 	entries := []sshconfig.HostEntry{
 		{Alias: "prod-api", Group: "prod", HostName: "192.0.2.12", User: "deploy"},
