@@ -31,6 +31,8 @@ ssht
 ssht --config ~/.ssh/config
 ssht --no-include
 ssht --debug
+ssht --doctor
+ssht doctor
 ssht --print-hosts
 ssht --terminal terminal
 ssht --open-mode tab
@@ -39,6 +41,7 @@ ssht --connect prod-api-01
 ```
 
 - `--print-hosts`：以 JSON 输出发现的主机。
+- `--doctor` / `ssht doctor`：检查 SSH config 健康状况并退出。
 - `--connect <alias>`：跳过 TUI，直接打开指定 Host。
 - `--no-include`：禁用 `Include` 递归解析。
 - `--debug`：把解析 warning 输出到 stderr。
@@ -58,8 +61,11 @@ SSHT_OPEN_MODE=tab ssht
 - `/`：进入搜索并编辑当前筛选
 - `Ctrl+U`：在搜索中清空筛选
 - `tag:<name>`：按标签筛选
+- `user:<name>` / `port:<port>` / `group:<name>` / `jump:<name>` / `file:<name>`：结构化筛选
+- `-<term>`：否定筛选，例如 `prod -db`
 - `fav:`：只显示收藏主机
 - `recent:`：只显示最近连接主机
+- `:` / `Ctrl+K`：打开命令面板
 - `[` / `]` 或 Left / Right：切换分组
 - `PgUp` / `PgDn` / `Home` / `End`：快速移动光标
 - `Tab`：在主机列表与分组侧栏之间切换焦点
@@ -74,6 +80,7 @@ SSHT_OPEN_MODE=tab ssht
 - `g`：移动当前主机或已标记主机到分组
 - `r`：重新加载 SSH config
 - `R`：刷新当前主机 monitor 快照
+- `H`：查看本地连接历史
 - `W`：查看 SSH config 解析 warning
 - `?`：帮助
 - `q` / `Esc`：退出
@@ -108,6 +115,15 @@ ssh <alias>
 ```
 
 所以 `Match`、token 展开、最终生效选项等复杂语义仍由 OpenSSH 处理。
+
+## 配置健康检查
+
+```bash
+ssht doctor
+ssht --doctor --config ~/.ssh/config
+```
+
+健康检查会复用 `ssht` 的解析结果并输出重复 Host alias、解析 warning、无效端口、空 HostName、重复 tags 等问题。发现 error 时进程以非 0 状态退出；warning 和 info 只作为提示。
 
 ## 分组、标签和隐藏
 

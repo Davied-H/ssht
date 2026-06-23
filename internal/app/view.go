@@ -12,20 +12,33 @@ import (
 )
 
 var (
+	brandStyle       = lipgloss.NewStyle().Foreground(lipgloss.Color("81")).Bold(true)
+	accentStyle      = lipgloss.NewStyle().Foreground(lipgloss.Color("67"))
+	focusStyle       = lipgloss.NewStyle().Foreground(lipgloss.Color("111")).Bold(true)
+	activeRowStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("230")).Background(lipgloss.Color("62")).Bold(true)
+	activeGroupStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("230")).Background(lipgloss.Color("60")).Bold(true)
+	successStyle     = lipgloss.NewStyle().Foreground(lipgloss.Color("78"))
+	warningStyle     = lipgloss.NewStyle().Foreground(lipgloss.Color("179"))
+	errorStyle       = lipgloss.NewStyle().Foreground(lipgloss.Color("203"))
+	infoStyle        = lipgloss.NewStyle().Foreground(lipgloss.Color("109"))
+	mutedStyle       = lipgloss.NewStyle().Foreground(lipgloss.Color("244"))
+	dimStyle         = lipgloss.NewStyle().Foreground(lipgloss.Color("239"))
+	panelBorder      = lipgloss.NewStyle().Foreground(lipgloss.Color("238"))
+	focusBorder      = lipgloss.NewStyle().Foreground(lipgloss.Color("81"))
+	statusBarStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("252")).Background(lipgloss.Color("235")).Bold(true)
+	filterBarStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("245")).Background(lipgloss.Color("234"))
+	commandBar       = lipgloss.NewStyle().Foreground(lipgloss.Color("246")).Background(lipgloss.Color("235"))
+
 	titleStyle    = lipgloss.NewStyle().Bold(true)
-	selectedStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("212")).Bold(true)
-	mutedStyle    = lipgloss.NewStyle().Foreground(lipgloss.Color("244"))
-	dimStyle      = lipgloss.NewStyle().Foreground(lipgloss.Color("240"))
-	errorStyle    = lipgloss.NewStyle().Foreground(lipgloss.Color("203"))
-	liveStyle     = lipgloss.NewStyle().Foreground(lipgloss.Color("42"))
-	warnStyle     = lipgloss.NewStyle().Foreground(lipgloss.Color("214"))
-	accentStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("75"))
-	rowFocusStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("212")).Bold(true)
+	selectedStyle = focusStyle
+	liveStyle     = successStyle
+	warnStyle     = warningStyle
+	rowFocusStyle = focusStyle
 )
 
 const (
-	footerPrimary       = "↵ connect · / search · g move · ←/→ group · Space mark · e edit · A add"
-	footerSecondary     = "Tab focus · ←/→ group · P preview · v expand · M monitor · r reload · ? help"
+	footerPrimary       = "Enter connect · : commands · / search · Space mark · g move · ? help"
+	footerSecondary     = "H history · P preview · v expand · M monitor · r reload"
 	previewMinWidth     = 26
 	previewBaseWidth    = 50
 	previewMaxWidth     = 80
@@ -35,6 +48,8 @@ const (
 	sidebarMinWidth     = 14
 	sidebarMaxWidth     = 18
 	threeColumnMinWidth = 96
+	panelChromeWidth    = 2
+	panelChromeHeight   = 2
 )
 
 func (m Model) View() string {
@@ -56,12 +71,18 @@ func (m Model) View() string {
 	if m.mode == modeWarnings {
 		return m.fitToWindow(m.warningsView())
 	}
+	if m.mode == modeHistory {
+		return m.fitToWindow(m.historyView())
+	}
+	if m.mode == modeCommandPalette {
+		return m.fitToWindow(m.commandPaletteView())
+	}
 
 	return m.browseView()
 }
 
 func panelTitle(title string) string {
-	return accentStyle.Render("▎ ") + titleStyle.Render(title)
+	return accentStyle.Render("▎ ") + brandStyle.Render(title)
 }
 
 func sectionLabel(label string) string {
@@ -75,9 +96,17 @@ func statusChip(label string, value int, style lipgloss.Style) string {
 func keyHints(hints ...string) string {
 	styled := make([]string, 0, len(hints))
 	for _, hint := range hints {
-		styled = append(styled, mutedStyle.Render(hint))
+		styled = append(styled, keyHint(hint))
 	}
 	return strings.Join(styled, dimStyle.Render(" · "))
+}
+
+func keyHint(hint string) string {
+	key, label, ok := strings.Cut(strings.TrimSpace(hint), " ")
+	if !ok {
+		return infoStyle.Render(hint)
+	}
+	return infoStyle.Render(key) + dimStyle.Render(" "+label)
 }
 
 func focusRow(row string) string {
@@ -121,23 +150,22 @@ func statusLine(status string) string {
 
 func (m Model) footerLines() []string {
 	primary := footerPrimary
-	secondary := footerSecondary
+	secondary := ""
 	if m.searchActive {
-		primary = "type search · Enter done · Esc done · Ctrl+U clear"
-		secondary = ""
+		primary = "type query · Enter apply · Esc close · Ctrl+U clear"
 	} else if m.focus == focusSidebar {
-		primary = "j/k move · Enter list · a create · r rename · m merge · d delete"
-		secondary = "/ search · P preview · M move marked here · J/K reorder · Esc list · ? help"
+		primary = "Enter select group · a create · r rename · d delete · J/K reorder · Esc list"
 	} else if len(m.selected) > 0 {
-		primary = "↵ connect marked · Space unmark · g move marked · / search · W warnings"
+		primary = "Enter connect marked · Space unmark · g move marked · : commands · W warnings"
 	} else if m.filter != "" {
-		primary = "↵ connect · / search · g group · Space mark · e edit"
+		primary = "Enter connect · / search · g move · Space mark · e edit"
 	} else if m.monitor != nil && m.monitorVisible {
-		secondary = "R refresh monitor · P preview · v expand · Tab focus · r reload · W warnings · ? help"
+		secondary = "R refresh monitor · P preview · v expand · r reload · W warnings"
 	}
-	lines := []string{keyHints(strings.Split(primary, " · ")...)}
+	rendered := keyHints(strings.Split(primary, " · ")...)
+	lines := []string{commandLine(rendered, m.width)}
 	if secondary != "" && (m.width <= 0 || m.width >= 96) {
-		lines = append(lines, keyHints(strings.Split(secondary, " · ")...))
+		lines = append(lines, commandLine(keyHints(strings.Split(secondary, " · ")...), m.width))
 	}
 	return lines
 }
@@ -237,6 +265,71 @@ func (m Model) warningsView() string {
 	return b.String()
 }
 
+func (m Model) historyView() string {
+	var b strings.Builder
+	b.WriteString(panelTitle("Connection history"))
+	b.WriteString("\n\n")
+	rows := m.historyRows()
+	if len(rows) == 0 {
+		b.WriteString(mutedStyle.Render("No connection history yet."))
+	} else {
+		b.WriteString(sectionLabel("Recent"))
+		b.WriteByte('\n')
+		limit := min(len(rows), 12)
+		for i := 0; i < limit; i++ {
+			row := rows[i]
+			b.WriteString("  ")
+			b.WriteString(padRight(row.Alias, 24))
+			b.WriteString("  ")
+			b.WriteString(mutedStyle.Render(fmt.Sprintf("%d×", row.ConnectCount)))
+			if row.LastConnectedAt != "" {
+				b.WriteString("  ")
+				b.WriteString(shortTime(row.LastConnectedAt))
+			}
+			if row.Favorite {
+				b.WriteString("  ")
+				b.WriteString(warnStyle.Render("★"))
+			}
+			b.WriteByte('\n')
+		}
+	}
+	b.WriteString("\n")
+	b.WriteString(keyHints("Esc close", "Enter close", "H close", "q quit"))
+	return b.String()
+}
+
+func (m Model) commandPaletteView() string {
+	var b strings.Builder
+	b.WriteString(panelTitle("Command palette"))
+	b.WriteString("\n\n")
+	b.WriteString(inputRow("Command", m.command.buffer))
+	b.WriteString(selectedStyle.Render("▏"))
+	b.WriteString("\n\n")
+	entries := m.commandEntries()
+	if len(entries) == 0 {
+		b.WriteString(mutedStyle.Render("No commands match."))
+		b.WriteByte('\n')
+	} else {
+		limit := min(len(entries), 9)
+		for i := 0; i < limit; i++ {
+			entry := entries[i]
+			row := "  " + padRight(entry.Title, 20) + "  " + mutedStyle.Render(entry.Description)
+			if i == m.command.cursor {
+				row = focusRow("› " + padRight(entry.Title, 20) + "  " + entry.Description)
+			}
+			b.WriteString(row)
+			b.WriteByte('\n')
+		}
+		if len(entries) > limit {
+			b.WriteString(mutedStyle.Render(fmt.Sprintf("  … %d more", len(entries)-limit)))
+			b.WriteByte('\n')
+		}
+	}
+	b.WriteString("\n")
+	b.WriteString(keyHints("Enter run", "↑/↓ choose", "type filter", "Ctrl+U clear", "Esc cancel"))
+	return b.String()
+}
+
 func (m Model) browseView() string {
 	footerLines := m.footerLines()
 	if m.status != "" {
@@ -260,7 +353,6 @@ func (m Model) browseLines(maxHeight int) []string {
 	lines := []string{
 		m.topStatusLine(),
 		m.filterLine(),
-		"",
 	}
 
 	bodyHeight := remainingLines(maxHeight, len(lines))
@@ -280,20 +372,21 @@ func (m Model) browseLines(maxHeight int) []string {
 	}
 
 	sidebarWidth, listWidth, previewWidth := m.splitThreeColumns()
-	listRows := m.listLines(bodyHeight, listWidth)
+	showGroupInList := sidebarWidth == 0 && m.selectedGroup() == "all" && m.hasMultipleGroups()
+	listRows := renderPanel("Hosts", m.listLines(bodyHeight-panelChromeHeight, innerWidth(listWidth), showGroupInList), listWidth, bodyHeight, m.focus == focusList && !m.searchActive)
 
 	switch {
 	case sidebarWidth == 0 && previewWidth == 0:
 		return append(lines, listRows...)
 	case sidebarWidth == 0:
-		previewRows := m.previewLines(bodyHeight, previewWidth)
+		previewRows := renderPanel("Preview", m.previewLines(bodyHeight-panelChromeHeight, innerWidth(previewWidth)), previewWidth, bodyHeight, false)
 		return append(lines, joinColumns(listRows, previewRows, listWidth)...)
 	case previewWidth == 0:
-		sidebarRows := m.sidebarLines(bodyHeight, sidebarWidth)
+		sidebarRows := renderPanel("Groups", m.sidebarLines(bodyHeight-panelChromeHeight, innerWidth(sidebarWidth)), sidebarWidth, bodyHeight, m.focus == focusSidebar)
 		return append(lines, joinColumns(sidebarRows, listRows, sidebarWidth)...)
 	default:
-		sidebarRows := m.sidebarLines(bodyHeight, sidebarWidth)
-		previewRows := m.previewLines(bodyHeight, previewWidth)
+		sidebarRows := renderPanel("Groups", m.sidebarLines(bodyHeight-panelChromeHeight, innerWidth(sidebarWidth)), sidebarWidth, bodyHeight, m.focus == focusSidebar)
+		previewRows := renderPanel("Preview", m.previewLines(bodyHeight-panelChromeHeight, innerWidth(previewWidth)), previewWidth, bodyHeight, false)
 		return append(lines, joinThreeColumns(sidebarRows, listRows, previewRows, sidebarWidth, listWidth)...)
 	}
 }
@@ -336,6 +429,20 @@ func (m Model) confirmView() string {
 	b.WriteByte('\n')
 
 	switch m.pending.operation {
+	case operationConnect:
+		b.WriteString(sectionLabel(fmt.Sprintf("Connecting %d host(s)", len(m.pending.movingHosts))))
+		b.WriteByte('\n')
+		for _, host := range m.pending.movingHosts {
+			risks := connectionConfirmRisks(host)
+			riskText := ""
+			if len(risks) > 0 {
+				riskText = "  " + warnStyle.Render(strings.Join(risks, " · "))
+			}
+			b.WriteString("  - ")
+			b.WriteString(host.Alias)
+			b.WriteString(riskText)
+			b.WriteByte('\n')
+		}
 	case operationGroupRename, operationGroupMerge:
 		b.WriteString(infoRow("From", m.pending.groupFrom))
 		b.WriteByte('\n')
@@ -381,18 +488,18 @@ func (m Model) confirmView() string {
 func (m Model) topStatusLine() string {
 	counts := m.dashboardCounts()
 	parts := []string{
-		titleStyle.Render("ssht"),
-		dimStyle.Render("group ") + accentStyle.Render(m.selectedGroup()),
+		brandStyle.Render("ssht"),
+		dimStyle.Render("Group ") + accentStyle.Render(m.selectedGroup()),
 		statusChip("Hosts", counts.Hosts, mutedStyle),
 	}
 	if counts.Matched != counts.Hosts {
-		parts = append(parts, statusChip("Matched", counts.Matched, accentStyle))
+		parts = append(parts, statusChip("Matched", counts.Matched, infoStyle))
 	}
 	if counts.Favorites > 0 {
-		parts = append(parts, statusChip("Fav", counts.Favorites, mutedStyle))
+		parts = append(parts, statusChip("★", counts.Favorites, warnStyle))
 	}
 	if counts.Recent > 0 {
-		parts = append(parts, statusChip("Recent", counts.Recent, mutedStyle))
+		parts = append(parts, statusChip("Recent", counts.Recent, liveStyle))
 	}
 	if counts.Selected > 0 {
 		value := fmt.Sprintf("%d", counts.Selected)
@@ -404,23 +511,29 @@ func (m Model) topStatusLine() string {
 	if counts.Warnings > 0 {
 		parts = append(parts, statusChip("⚠", counts.Warnings, errorStyle))
 	}
-	return strings.Join(parts, dimStyle.Render("  "))
+	return fillLine(statusBarStyle.Render(" "+strings.Join(parts, dimStyle.Render("  "))+" "), m.width)
 }
 
 func (m Model) filterLine() string {
 	if m.searchActive {
-		prompt := selectedStyle.Render("SEARCH ")
+		prompt := focusStyle.Render(" SEARCH ")
 		value := m.filter
 		if value == "" {
-			value = mutedStyle.Render("tag:<name> · fav: · recent:")
+			value = mutedStyle.Render("user:deploy · group:prod · -db · tag:<name>")
 		}
-		return accentStyle.Render("▎ ") + prompt + value + selectedStyle.Render("▏") + dimStyle.Render("  editing current filter · Ctrl+U clear · Enter/Esc done")
+		summary := fmt.Sprintf("  %d/%d hosts", len(m.filtered), len(m.entries))
+		if group := m.selectedGroup(); group != "" && group != "all" {
+			summary += " · " + group
+		}
+		line := prompt + value + focusStyle.Render("▏") + dimStyle.Render(summary+" · Enter apply · Esc close · Ctrl+U clear")
+		return fillLine(filterBarStyle.Render(" "+line+" "), m.width)
 	}
-	prompt := accentStyle.Render("/ search ")
+	prompt := infoStyle.Render(" Filter ")
 	if m.filter == "" {
-		return prompt + mutedStyle.Render("shortcuts active · tag:<name> · fav: · recent:")
+		return fillLine(filterBarStyle.Render(" "+prompt+mutedStyle.Render("/ search · user:deploy · group:prod · -db · tag:<name>")+" "), m.width)
 	}
-	return prompt + m.filter + dimStyle.Render("  / edit · Ctrl+U clear in search")
+	summary := fmt.Sprintf("  %d/%d matches", len(m.filtered), len(m.entries))
+	return fillLine(filterBarStyle.Render(" "+prompt+m.filter+dimStyle.Render(summary+" · / edit · Ctrl+U clear in search")+" "), m.width)
 }
 
 func (m Model) splitColumns() (left, right int) {
@@ -522,6 +635,7 @@ func (m Model) computeSidebarWidth() int {
 			longest = candidate
 		}
 	}
+	longest += panelChromeWidth
 	if longest < sidebarMinWidth {
 		longest = sidebarMinWidth
 	}
@@ -549,36 +663,17 @@ func (m Model) sidebarLines(maxLines, width int) []string {
 		return nil
 	}
 	selected := m.selectedGroup()
-	lines := make([]string, 0, len(items)+1)
-	title := sectionLabel("groups")
-	if m.focus == focusSidebar {
-		title = accentStyle.Render("groups") + dimStyle.Render(" · focus")
+	selectedHostGroup := ""
+	if entry, ok := m.Selected(); ok {
+		selectedHostGroup = strings.TrimSpace(entry.Group)
 	}
-	lines = append(lines, truncate(title, width))
+	lines := make([]string, 0, len(items))
 
-	rowBudget := maxLines - len(lines)
+	rowBudget := maxLines
 	if rowBudget <= 0 {
 		return fitLines(lines, maxLines)
 	}
-	start := 0
-	if len(items) > rowBudget {
-		for i, item := range items {
-			if item.Name == selected {
-				start = i - rowBudget/2
-				break
-			}
-		}
-		if start < 0 {
-			start = 0
-		}
-		if maxStart := len(items) - rowBudget; start > maxStart {
-			start = maxStart
-		}
-	}
-	end := start + rowBudget
-	if end > len(items) {
-		end = len(items)
-	}
+	start, end := visibleGroupRange(items, selected, rowBudget)
 	for _, item := range items[start:end] {
 		marker := "  "
 		if item.Name == selected {
@@ -593,8 +688,10 @@ func (m Model) sidebarLines(maxLines, width int) []string {
 		row := marker + padRight(name, nameWidth) + " " + countStr
 		switch {
 		case m.focus == focusSidebar && item.Name == selected:
-			row = selectedStyle.Render(row)
+			row = activeGroupStyle.Render(fitPlainRow(row, width))
 		case item.Name == selected:
+			row = activeGroupStyle.Render(fitPlainRow(row, width))
+		case selectedHostGroup != "" && item.Name == selectedHostGroup:
 			row = accentStyle.Render(row)
 		default:
 			row = mutedStyle.Render(row)
@@ -647,7 +744,68 @@ func fitColumnWidth(s string, width int, pad string) string {
 	return s
 }
 
-func (m Model) listLines(maxLines, width int) []string {
+func innerWidth(width int) int {
+	if width <= panelChromeWidth {
+		return max(width, 0)
+	}
+	return width - panelChromeWidth
+}
+
+func renderPanel(title string, rows []string, width, height int, focused bool) []string {
+	if width <= 0 || height <= 0 {
+		return nil
+	}
+	if width < 4 || height < 3 {
+		return fitLines(rows, height)
+	}
+	border := panelBorder
+	if focused {
+		border = focusBorder
+	}
+	innerW := width - 2
+	bodyH := height - 2
+	titleText := " " + title + " "
+	titleW := lipgloss.Width(titleText)
+	if titleW > innerW {
+		titleText = ansi.Truncate(titleText, innerW, "…")
+		titleW = lipgloss.Width(titleText)
+	}
+	top := border.Render("╭") + titleStyle.Render(titleText) + border.Render(strings.Repeat("─", innerW-titleW)+"╮")
+	bottom := border.Render("╰" + strings.Repeat("─", innerW) + "╯")
+
+	rows = fitLines(rows, bodyH)
+	if len(rows) < bodyH {
+		rows = append(rows, make([]string, bodyH-len(rows))...)
+	}
+	out := make([]string, 0, height)
+	out = append(out, top)
+	for _, row := range rows {
+		row = fitColumnWidth(row, innerW, strings.Repeat(" ", innerW))
+		out = append(out, border.Render("│")+row+border.Render("│"))
+	}
+	out = append(out, bottom)
+	return out
+}
+
+func fillLine(line string, width int) string {
+	if width <= 0 {
+		return line
+	}
+	return fitColumnWidth(line, width, strings.Repeat(" ", width))
+}
+
+func commandLine(line string, width int) string {
+	return fillLine(commandBar.Render(" "+line+" "), width)
+}
+
+func fitPlainRow(row string, width int) string {
+	if width <= 0 {
+		return row
+	}
+	return fitColumnWidth(row, width, strings.Repeat(" ", width))
+}
+
+func (m Model) listLines(maxLines, width int, showGroup bool) []string {
 	if maxLines <= 0 {
 		return nil
 	}
@@ -659,31 +817,15 @@ func (m Model) listLines(maxLines, width int) []string {
 	if rowBudget <= 0 {
 		return fitLines(lines, maxLines)
 	}
-	hasHidden := len(m.filtered) > rowBudget
-	if hasHidden && rowBudget > 1 {
-		rowBudget--
-	}
-	start := 0
-	if len(m.filtered) > rowBudget {
-		start = m.cursor - rowBudget/2
-		if start < 0 {
-			start = 0
-		}
-		if maxStart := len(m.filtered) - rowBudget; start > maxStart {
-			start = maxStart
-		}
-	}
-	end := start + rowBudget
-	if end > len(m.filtered) {
-		end = len(m.filtered)
-	}
+	start, visibleRows := visibleListRange(len(m.filtered), m.cursor, rowBudget)
+	end := start + visibleRows
 
 	for i := start; i < end; i++ {
-		lines = append(lines, m.formatListRow(i, width))
+		lines = append(lines, m.formatListRow(i, width, showGroup))
 	}
 	hidden := len(m.filtered) - (end - start)
 	if hidden > 0 && len(lines) < maxLines {
-		lines = append(lines, "  "+mutedStyle.Render(fmt.Sprintf("… %d more", hidden)))
+		lines = append(lines, "  "+mutedStyle.Render(fmt.Sprintf("… %d more · PgDn/End", hidden)))
 	}
 	return lines
 }
@@ -692,10 +834,22 @@ func (m Model) listHeader(width int) string {
 	if width <= 0 {
 		return ""
 	}
-	header := "  " + dimStyle.Render("state") + " " + sectionLabel("host")
+	label := sectionLabel("host")
+	if m.focus == focusList && !m.searchActive {
+		label = focusStyle.Render("HOST")
+	}
+	header := "  " + dimStyle.Render("state") + " " + label
 	if len(m.filtered) > 0 {
 		pos := fmt.Sprintf("%d/%d", m.cursor+1, len(m.filtered))
-		header = layoutLeftRight(header, dimStyle.Render(pos), width)
+		right := dimStyle.Render(pos)
+		if width >= 54 {
+			rightLabel := "TARGET"
+			if strings.TrimSpace(m.filter) != "" {
+				rightLabel = "MATCH"
+			}
+			right = dimStyle.Render(rightLabel + "  " + pos)
+		}
+		header = layoutLeftRight(header, right, width)
 	}
 	if lipgloss.Width(header) > width {
 		return truncate(header, width)
@@ -703,10 +857,23 @@ func (m Model) listHeader(width int) string {
 	return header
 }
 
-func (m Model) formatListRow(i, width int) string {
+func (m Model) formatListRow(i, width int, showGroup bool) string {
 	entry := m.filtered[i]
 	markers := m.entryMarkerCell(entry)
 	connection := connectionString(entry)
+	if strings.TrimSpace(m.filter) != "" {
+		if context := m.searchContext(entry, m.filter); context != "" {
+			connection = "match: " + context
+		}
+	}
+	if showGroup && entry.Group != "" {
+		group := "[" + entry.Group + "]"
+		if connection == "" {
+			connection = group
+		} else {
+			connection = group + " " + connection
+		}
+	}
 
 	prefix := "  "
 	if i == m.cursor {
@@ -735,7 +902,7 @@ func (m Model) formatListRow(i, width int) string {
 	alias := padRight(aliasText, aliasReserve)
 	connStr := ""
 	if connectionReserve > 0 && connection != "" {
-		connStr = " " + mutedStyle.Render(truncate(connection, connectionReserve))
+		connStr = " " + mutedStyle.Render(highlightSearchTerm(truncate(connection, connectionReserve), m.filter))
 	}
 
 	renderedAlias := titleStyle.Render(alias)
@@ -744,9 +911,28 @@ func (m Model) formatListRow(i, width int) string {
 	}
 	row := prefix + markers + " " + renderedAlias + connStr
 	if i == m.cursor {
-		row = focusRow(prefix+markers+" "+highlightSearchTerm(alias, m.filter)) + connStr
+		plainActive := prefix + markers + " " + highlightSearchTerm(alias, m.filter)
+		if connectionReserve > 0 && connection != "" {
+			plainActive += " " + truncate(connection, connectionReserve)
+		}
+		row = activeRowStyle.Render(fitPlainRow(plainActive, width))
 	}
 	return row
+}
+
+func (m Model) hasMultipleGroups() bool {
+	seen := map[string]bool{}
+	for _, entry := range m.entries {
+		group := strings.TrimSpace(entry.Group)
+		if group == "" {
+			continue
+		}
+		seen[group] = true
+		if len(seen) > 1 {
+			return true
+		}
+	}
+	return len(seen) > 0 && len(m.state.EmptyGroups) > 0
 }
 
 func formatField(label, value string, width int) string {
@@ -760,6 +946,7 @@ func formatField(label, value string, width int) string {
 
 func highlightSearchTerm(value, query string) string {
 	terms := textSearchTerms(query)
+	terms = append(terms, structuredSearchValues(query)...)
 	if len(terms) == 0 {
 		return value
 	}
@@ -782,6 +969,28 @@ func highlightSearchTerm(value, query string) string {
 		return fuzzyHighlight
 	}
 	return value
+}
+
+func structuredSearchValues(query string) []string {
+	parts := strings.Fields(strings.ToLower(strings.TrimSpace(query)))
+	values := make([]string, 0, len(parts))
+	for _, part := range parts {
+		part = strings.TrimPrefix(part, "-")
+		if strings.HasPrefix(part, "tag:") {
+			if value := strings.TrimSpace(strings.TrimPrefix(part, "tag:")); value != "" {
+				values = append(values, value)
+			}
+			continue
+		}
+		key, value, ok := strings.Cut(part, ":")
+		if !ok || !isStructuredSearchKey(key) {
+			continue
+		}
+		if value = strings.TrimSpace(value); value != "" {
+			values = append(values, value)
+		}
+	}
+	return values
 }
 
 func highlightFuzzyRunes(value, term string) string {
@@ -878,6 +1087,7 @@ func (m Model) helpView() string {
 		"",
 		"/      Enter search mode and edit the current filter.",
 		"Ctrl+U Clear the filter while search mode is active.",
+		":      Open the command palette (Ctrl+K also works).",
 		"Enter  Open the selected host using the configured terminal mode.",
 		"Space  Mark or unmark a host for batch connect across filters/groups.",
 		"f      Toggle favorite for the selected host.",
@@ -886,6 +1096,7 @@ func (m Model) helpView() string {
 		"v      Toggle expanded preview (full top processes, raw config, all tags).",
 		"M      Toggle the SSH monitoring panel (Health + Top CPU).",
 		"R      Refresh the selected host's monitor snapshot now.",
+		"H      Show local connection history.",
 		"W      Show parser warnings.",
 		"PgUp/PgDn/Home/End  Move quickly through the host list.",
 		"Tab    Toggle focus between host list and group sidebar.",
@@ -912,7 +1123,7 @@ func (m Model) helpView() string {
 		"Tab    Cycle through known group names while in the Group field.",
 		"Ctrl+U Clear the current field; Ctrl+A/Ctrl+E move to field start/end.",
 		"",
-		mutedStyle.Render("Use tag:<name>, fav:, and recent: in search mode. Connection command: ssh <alias>; OpenSSH resolves the full config."),
+		mutedStyle.Render("Search supports tag:<name>, fav:, recent:, user:, port:, group:, jump:, file:, alias:, and negation like -db. Connection command: ssh <alias>; OpenSSH resolves the full config."),
 	}, "\n")
 }
 
@@ -933,7 +1144,7 @@ func (m Model) entryMarkerCell(entry sshconfig.HostEntry) string {
 		cell := string(marker)
 		switch {
 		case marker == ' ':
-			rendered = append(rendered, dimStyle.Render("·"))
+			rendered = append(rendered, " ")
 		case i == 0:
 			rendered = append(rendered, selectedStyle.Render(cell))
 		case i == 1:
@@ -975,6 +1186,8 @@ func operationLabel(operation operationType) string {
 		return "delete group"
 	case operationGroupMoveHosts:
 		return "move hosts to group"
+	case operationConnect:
+		return "connect"
 	default:
 		return "unknown"
 	}

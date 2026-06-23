@@ -50,6 +50,83 @@ func TestModelFiltersAndReloadsHosts(t *testing.T) {
 	}
 }
 
+func TestModelStructuredSearchAndNegation(t *testing.T) {
+	model := NewModel(Config{Entries: []sshconfig.HostEntry{
+		{Alias: "prod-api", Group: "prod", HostName: "192.0.2.12", User: "deploy", Port: "22", ProxyJump: "bastion", SourceFile: "/tmp/work"},
+		{Alias: "prod-db", Group: "prod", HostName: "192.0.2.13", User: "root", Port: "2200", SourceFile: "/tmp/work"},
+		{Alias: "dev-api", Group: "dev", HostName: "dev.example.com", User: "deploy", Port: "22", SourceFile: "/tmp/dev"},
+	}})
+
+	model = typeSearch(model, "user:deploy group:prod -db jump:bastion")
+	filtered := model.FilteredEntries()
+	if len(filtered) != 1 || filtered[0].Alias != "prod-api" {
+		t.Fatalf("filtered = %#v, want prod-api", filtered)
+	}
+}
+
+func TestSearchRequiresEveryTextTerm(t *testing.T) {
+	model := NewModel(Config{Entries: []sshconfig.HostEntry{
+		{Alias: "prod-api", HostName: "api.example.com"},
+		{Alias: "prod-db", HostName: "db.example.com"},
+	}})
+
+	model = typeSearch(model, "prod missing")
+
+	if got := len(model.FilteredEntries()); got != 0 {
+		t.Fatalf("filtered count = %d, want 0", got)
+	}
+}
+
+func TestSearchContextExplainsStructuredMatch(t *testing.T) {
+	model := NewModel(Config{Entries: []sshconfig.HostEntry{
+		{Alias: "prod-api", User: "deploy", HostName: "api.example.com"},
+	}})
+
+	if got := model.searchContext(model.entries[0], "host:api"); got != "host api.example.com" {
+		t.Fatalf("search context = %q, want host api.example.com", got)
+	}
+}
+
+func TestCommandPaletteOpensHistory(t *testing.T) {
+	model := NewModel(Config{Entries: []sshconfig.HostEntry{{Alias: "prod-api"}}})
+
+	var cmd tea.Cmd
+	model, cmd = model.update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(":")})
+	if cmd != nil || model.mode != modeCommandPalette {
+		t.Fatalf("mode=%v cmd=%v, want command palette", model.mode, cmd)
+	}
+	model, _ = model.update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("history")})
+	model, cmd = model.update(tea.KeyMsg{Type: tea.KeyEnter})
+	if cmd != nil || model.mode != modeHistory {
+		t.Fatalf("mode=%v cmd=%v, want history", model.mode, cmd)
+	}
+}
+
+func TestRiskyConnectOpensWithoutConfirmation(t *testing.T) {
+	runner := &countingRunner{}
+	model := NewModel(Config{
+		Entries: []sshconfig.HostEntry{{Alias: "prod-api", Group: "prod", User: "root"}},
+		Manager: terminal.Manager{
+			Runner:     runner,
+			Preference: "terminal",
+			OpenMode:   terminal.OpenModeWindow,
+		},
+	})
+
+	updated, cmd := model.update(tea.KeyMsg{Type: tea.KeyEnter})
+	model = updated
+	if cmd == nil {
+		t.Fatal("risky connect should return connect command")
+	}
+	if model.mode != modeBrowse || model.pending.entry.Alias != "" || len(model.pending.movingHosts) != 0 {
+		t.Fatalf("mode=%v pending=%#v, want browse with no pending connect", model.mode, model.pending)
+	}
+	model, _ = model.update(cmd())
+	if runner.runCalls != 1 {
+		t.Fatalf("run calls = %d, want 1", runner.runCalls)
+	}
+}
+
 func TestSearchModeKeepsActionKeysAsFilterText(t *testing.T) {
 	model := NewModel(Config{Entries: []sshconfig.HostEntry{
 		{Alias: "test-host"},
@@ -80,6 +157,67 @@ func TestPlainTypingDoesNotEnterSearchMode(t *testing.T) {
 	}
 	if len(model.FilteredEntries()) != 2 {
 		t.Fatalf("plain typing should keep all entries, got %#v", model.FilteredEntries())
+	}
+}
+
+func TestMouseClickFilterBarStartsSearch(t *testing.T) {
+	model := NewModel(Config{Entries: []sshconfig.HostEntry{{Alias: "prod-api"}}})
+	model, _ = model.update(tea.WindowSizeMsg{Width: 120, Height: 18})
+
+	model, _ = model.update(tea.MouseMsg(tea.MouseEvent{
+		X:      10,
+		Y:      1,
+		Action: tea.MouseActionPress,
+		Button: tea.MouseButtonLeft,
+	}))
+
+	if !model.searchActive {
+		t.Fatal("clicking filter bar should activate search")
+	}
+}
+
+func TestMouseClickHostRowSelectsHost(t *testing.T) {
+	model := NewModel(Config{Entries: []sshconfig.HostEntry{
+		{Alias: "prod-api", Group: "prod"},
+		{Alias: "dev-db", Group: "dev"},
+	}})
+	model, _ = model.update(tea.WindowSizeMsg{Width: 140, Height: 24})
+	sidebarW, _, _ := model.splitThreeColumns()
+
+	model, _ = model.update(tea.MouseMsg(tea.MouseEvent{
+		X:      sidebarW + 4,
+		Y:      5,
+		Action: tea.MouseActionPress,
+		Button: tea.MouseButtonLeft,
+	}))
+
+	if model.cursor != 1 {
+		t.Fatalf("cursor = %d, want clicked second row", model.cursor)
+	}
+	if model.focus != focusList {
+		t.Fatalf("focus = %d, want focusList", model.focus)
+	}
+}
+
+func TestMouseClickGroupSelectsGroup(t *testing.T) {
+	model := NewModel(Config{Entries: []sshconfig.HostEntry{
+		{Alias: "prod-api", Group: "prod"},
+		{Alias: "dev-db", Group: "dev"},
+	}})
+	model, _ = model.update(tea.WindowSizeMsg{Width: 140, Height: 24})
+
+	model, _ = model.update(tea.MouseMsg(tea.MouseEvent{
+		X:      3,
+		Y:      5,
+		Action: tea.MouseActionPress,
+		Button: tea.MouseButtonLeft,
+	}))
+
+	if got := model.selectedGroup(); got != "prod" {
+		t.Fatalf("clicked group = %q, want prod", got)
+	}
+	if model.focus != focusSidebar {
+		t.Fatalf("focus = %d, want focusSidebar", model.focus)
 	}
 }
 
@@ -169,7 +307,7 @@ func TestConnectPassesSSHPasswordToTerminalManager(t *testing.T) {
 	if runner.lastRunJoined == "" {
 		t.Fatal("expected terminal command to run")
 	}
-	if !strings.Contains(runner.lastRunJoined, "sshpass -p 'secret' ssh 'password-host'") {
+	if !strings.Contains(runner.lastRunJoined, "env -u LC_ALL sshpass -p 'secret' ssh 'password-host'") {
 		t.Fatalf("terminal command = %q, want sshpass command", runner.lastRunJoined)
 	}
 }
@@ -920,7 +1058,7 @@ func TestBrowseViewFitsWindowHeight(t *testing.T) {
 	if got, want := renderedLineCount(view), 18; got > want {
 		t.Fatalf("view rendered %d lines, want at most %d:\n%s", got, want, view)
 	}
-	if !strings.Contains(view, "←/→ group") {
+	if !strings.Contains(view, "Enter connect") {
 		t.Fatalf("footer missing from constrained view:\n%s", view)
 	}
 	for _, line := range strings.Split(view, "\n") {

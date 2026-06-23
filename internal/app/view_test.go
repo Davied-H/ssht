@@ -45,6 +45,23 @@ func TestSidebarHidesOnNarrowTerminal(t *testing.T) {
 	}
 }
 
+func TestNarrowListShowsGroupWhenSidebarIsHidden(t *testing.T) {
+	entries := []sshconfig.HostEntry{
+		{Alias: "prod-api", Group: "prod", HostName: "192.0.2.12", User: "deploy"},
+		{Alias: "dev-db", Group: "dev", HostName: "192.0.2.20", User: "root"},
+	}
+	model := NewModel(Config{Entries: entries})
+	model, _ = model.update(tea.WindowSizeMsg{Width: 80, Height: 20})
+
+	view := stripANSI(model.View())
+	if strings.Contains(view, "GROUPS") {
+		t.Fatalf("sidebar should be hidden at width=80:\n%s", view)
+	}
+	if !strings.Contains(view, "[dev]") {
+		t.Fatalf("narrow list should include group context when sidebar is hidden:\n%s", view)
+	}
+}
+
 func TestSidebarShowsEmptyGroupsWithZeroCount(t *testing.T) {
 	entries := []sshconfig.HostEntry{{Alias: "a", Group: "prod"}}
 	store := state.NewStore()
@@ -82,6 +99,47 @@ func TestTopStatusLineHasNoGroupTabs(t *testing.T) {
 	}
 	if !strings.Contains(statusLine, "Hosts") {
 		t.Fatalf("top status line should contain Hosts count: %q", statusLine)
+	}
+}
+
+func TestBrowseViewRendersBorderedPanelsOnWideTerminal(t *testing.T) {
+	entries := []sshconfig.HostEntry{
+		{Alias: "prod-api", Group: "prod", HostName: "192.0.2.12", User: "deploy"},
+		{Alias: "dev-db", Group: "dev", HostName: "192.0.2.20", User: "root"},
+	}
+	model := newWideModel(t, entries, state.NewStore())
+	model, _ = model.update(tea.WindowSizeMsg{Width: 180, Height: 30})
+
+	view := stripANSI(model.View())
+	for _, want := range []string{"╭ Groups", "╭ Hosts", "╭ Preview", "╰"} {
+		if !strings.Contains(view, want) {
+			t.Fatalf("wide view missing bordered panel %q:\n%s", want, view)
+		}
+	}
+}
+
+func TestPreviewShowsConnectionConfirmationSections(t *testing.T) {
+	entries := []sshconfig.HostEntry{
+		{
+			Alias:        "prod-api",
+			Group:        "prod",
+			Tags:         []string{"api"},
+			HostName:     "192.0.2.12",
+			User:         "root",
+			IdentityFile: "~/.ssh/prod.pem",
+			ProxyJump:    "jump-prod",
+			SourceFile:   "~/.ssh/config",
+			SourceLine:   12,
+		},
+	}
+	model := newWideModel(t, entries, state.NewStore())
+	model, _ = model.update(tea.WindowSizeMsg{Width: 180, Height: 30})
+
+	view := stripANSI(model.View())
+	for _, want := range []string{"┃ Target", "┃ Group", "┃ Tags", "┃ Auth", "┃ Route", "┃ Source", "┃ Risk", "root login", "public ip", "production", "routed connection"} {
+		if !strings.Contains(view, want) {
+			t.Fatalf("preview missing %q:\n%s", want, view)
+		}
 	}
 }
 
@@ -163,7 +221,7 @@ func TestBrowseViewRendersProfessionalStructureOnWideTerminal(t *testing.T) {
 	model := newWideModel(t, entries, state.NewStore())
 
 	view := model.View()
-	for _, want := range []string{"GROUPS", "state HOST", "/ search shortcuts active", "▎", "›"} {
+	for _, want := range []string{"Groups", "state HOST", "Filter / search", "╭", "›"} {
 		if !strings.Contains(view, want) {
 			t.Fatalf("wide view missing %q:\n%s", want, view)
 		}
@@ -177,7 +235,23 @@ func TestSearchViewShowsEditAndClearHints(t *testing.T) {
 	model = typeSearch(model, "prod")
 
 	view := stripANSI(model.View())
-	for _, want := range []string{"SEARCH prod", "editing current filter", "Ctrl+U clear", "Enter/Esc done"} {
+	for _, want := range []string{"SEARCH prod", "1/1 hosts", "Enter apply", "Esc close", "Ctrl+U clear"} {
+		if !strings.Contains(view, want) {
+			t.Fatalf("search view missing %q:\n%s", want, view)
+		}
+	}
+}
+
+func TestSearchViewShowsMatchContext(t *testing.T) {
+	model := newWideModel(t, []sshconfig.HostEntry{
+		{Alias: "prod-api", HostName: "api.example.com", User: "deploy"},
+		{Alias: "prod-db", HostName: "db.example.com", User: "deploy"},
+	}, state.NewStore())
+	model, _ = model.update(tea.WindowSizeMsg{Width: 180, Height: 30})
+	model = typeSearch(model, "host:api")
+
+	view := stripANSI(model.View())
+	for _, want := range []string{"MATCH", "match: host api.example.com"} {
 		if !strings.Contains(view, want) {
 			t.Fatalf("search view missing %q:\n%s", want, view)
 		}
@@ -210,6 +284,18 @@ func TestHelpViewDocumentsSearchClearShortcut(t *testing.T) {
 	}
 }
 
+func TestFooterHintsKeepPlainTextStableWithStyledKeys(t *testing.T) {
+	model := NewModel(Config{Entries: []sshconfig.HostEntry{{Alias: "prod-api"}}})
+	model, _ = model.update(tea.WindowSizeMsg{Width: 120, Height: 18})
+
+	view := stripANSI(model.View())
+	for _, want := range []string{"Enter connect", "/ search", "Space mark", "? help"} {
+		if !strings.Contains(view, want) {
+			t.Fatalf("footer hint missing %q:\n%s", want, view)
+		}
+	}
+}
+
 func TestBrowseViewPinsFooterToBottom(t *testing.T) {
 	entries := []sshconfig.HostEntry{
 		{Alias: "prod-api", Group: "prod", HostName: "192.0.2.12", User: "deploy"},
@@ -221,11 +307,8 @@ func TestBrowseViewPinsFooterToBottom(t *testing.T) {
 	if len(lines) != 24 {
 		t.Fatalf("view height = %d, want 24\n%s", len(lines), model.View())
 	}
-	if !strings.Contains(stripANSI(lines[22]), "connect") {
-		t.Fatalf("primary footer should be on second-to-last row, got %q\n%s", stripANSI(lines[22]), model.View())
-	}
-	if !strings.Contains(stripANSI(lines[23]), "Tab focus") {
-		t.Fatalf("secondary footer should be on last row, got %q\n%s", stripANSI(lines[23]), model.View())
+	if !strings.Contains(stripANSI(lines[23]), "Enter connect") {
+		t.Fatalf("footer should be on last row, got %q\n%s", stripANSI(lines[23]), model.View())
 	}
 }
 
@@ -246,7 +329,7 @@ func TestBrowseViewWidthIsRespectedAcrossBreakpoints(t *testing.T) {
 		model := NewModel(Config{Entries: entries})
 		model, _ = model.update(tea.WindowSizeMsg{Width: width, Height: 18})
 		view := model.View()
-		if !strings.Contains(view, "↵ connect") {
+		if !strings.Contains(view, "Enter connect") {
 			t.Fatalf("width=%d footer missing:\n%s", width, view)
 		}
 		for _, line := range strings.Split(view, "\n") {

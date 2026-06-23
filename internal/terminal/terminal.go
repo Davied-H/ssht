@@ -393,16 +393,16 @@ func isITermSession(env EnvLookup) bool {
 
 func sshCommand(target Target) string {
 	if target.SSHPassword == "" {
-		return "ssh " + shellQuote(target.Alias)
+		return "env -u LC_ALL ssh " + shellQuote(target.Alias)
 	}
-	return "sshpass -p " + shellQuote(target.SSHPassword) + " ssh " + shellQuote(target.Alias)
+	return "env -u LC_ALL sshpass -p " + shellQuote(target.SSHPassword) + " ssh " + shellQuote(target.Alias)
 }
 
 func sshCommandArgs(target Target) []string {
 	if target.SSHPassword == "" {
-		return []string{"ssh", target.Alias}
+		return []string{"env", "-u", "LC_ALL", "ssh", target.Alias}
 	}
-	return []string{"sshpass", "-p", target.SSHPassword, "ssh", target.Alias}
+	return []string{"env", "-u", "LC_ALL", "sshpass", "-p", target.SSHPassword, "ssh", target.Alias}
 }
 
 func shellQuote(value string) string {

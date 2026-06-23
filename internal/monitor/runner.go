@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"os"
 	"os/exec"
 	"strings"
 	"time"
@@ -53,18 +54,20 @@ func Probe(ctx context.Context, target ProbeTarget) (*Snapshot, error) {
 
 func buildProbeCmd(ctx context.Context, target ProbeTarget) (*exec.Cmd, error) {
 	if target.Password == "" {
-		return exec.CommandContext(ctx, "ssh",
+		cmd := exec.CommandContext(ctx, "ssh",
 			"-o", "BatchMode=yes",
 			"-o", "ConnectTimeout=4",
 			"-o", "StrictHostKeyChecking=accept-new",
 			"--",
 			target.Alias, "sh -s",
-		), nil
+		)
+		cmd.Env = withoutEnv(os.Environ(), "LC_ALL")
+		return cmd, nil
 	}
 	if _, err := exec.LookPath("sshpass"); err != nil {
 		return nil, errors.New("sshpass not installed")
 	}
-	return exec.CommandContext(ctx, "sshpass",
+	cmd := exec.CommandContext(ctx, "sshpass",
 		"-p", target.Password,
 		"ssh",
 		"-o", "ConnectTimeout=4",
@@ -72,7 +75,9 @@ func buildProbeCmd(ctx context.Context, target ProbeTarget) (*exec.Cmd, error) {
 		"-o", "NumberOfPasswordPrompts=1",
 		"--",
 		target.Alias, "sh -s",
-	), nil
+	)
+	cmd.Env = withoutEnv(os.Environ(), "LC_ALL")
+	return cmd, nil
 }
 
 // formatProbeError turns sshpass/ssh failures into a single short line suitable for
@@ -124,4 +129,15 @@ func firstLine(s string) string {
 		return strings.TrimSpace(s[:i])
 	}
 	return s
+}
+
+func withoutEnv(environ []string, name string) []string {
+	prefix := name + "="
+	filtered := environ[:0]
+	for _, entry := range environ {
+		if !strings.HasPrefix(entry, prefix) {
+			filtered = append(filtered, entry)
+		}
+	}
+	return filtered
 }

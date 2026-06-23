@@ -41,6 +41,7 @@ cd ssht
 ssht
 ssht --config ~/.ssh/config
 ssht --print-hosts
+ssht doctor
 ssht --connect prod-api-01
 ```
 
@@ -48,10 +49,12 @@ ssht --connect prod-api-01
 
 - `/`：进入搜索并编辑当前筛选
 - `Ctrl+U`：在搜索中清空筛选
+- `:` / `Ctrl+K`：打开命令面板
 - `Enter`：打开选中主机
 - `Space`：标记主机，批量打开
 - `[` / `]`：切换分组
 - `g`：移动主机到分组
+- `H`：查看本地连接历史
 - `A` / `e` / `d`：新增、编辑、删除主机
 - `?`：帮助
 - `q` / `Esc`：退出
@@ -70,8 +73,10 @@ Host prod-api-01
 `group` 用于左侧分组，`tags` 用于搜索，例如：
 
 ```text
-tag:api fav:
+tag:api fav: user:deploy group:prod -db
 ```
+
+也可以运行 `ssht doctor` 检查重复别名、解析 warning、无效端口等配置健康问题。
 
 ## 更多文档
 

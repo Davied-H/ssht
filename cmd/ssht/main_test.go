@@ -4,6 +4,9 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/charmbracelet/lipgloss"
+	"github.com/muesli/termenv"
+
 	"github.com/dong/ssht/internal/sshconfig"
 )
 
@@ -108,6 +111,33 @@ func TestParseOptionsAcceptsConnectHost(t *testing.T) {
 	}
 	if options.ConnectHost != "prod-api-01" {
 		t.Fatalf("connect host = %q, want prod-api-01", options.ConnectHost)
+	}
+}
+
+func TestParseOptionsAcceptsDoctorSubcommand(t *testing.T) {
+	options, err := parseOptions([]string{"doctor", "--config", "/tmp/config"})
+	if err != nil {
+		t.Fatalf("parseOptions: %v", err)
+	}
+	if !options.Doctor {
+		t.Fatal("Doctor = false, want true")
+	}
+	if options.ConfigPath != "/tmp/config" {
+		t.Fatalf("ConfigPath = %q, want /tmp/config", options.ConfigPath)
+	}
+}
+
+func TestEnableTUIColorProfileForcesTrueColor(t *testing.T) {
+	previous := lipgloss.ColorProfile()
+	t.Cleanup(func() {
+		lipgloss.SetColorProfile(previous)
+	})
+
+	lipgloss.SetColorProfile(termenv.ANSI256)
+	enableTUIColorProfile()
+
+	if got := lipgloss.ColorProfile(); got != termenv.TrueColor {
+		t.Fatalf("color profile = %v, want %v", got, termenv.TrueColor)
 	}
 }
 

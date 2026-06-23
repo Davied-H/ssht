@@ -55,7 +55,7 @@ func TestConnectUsesBackendSelectedByAvailabilityCheck(t *testing.T) {
 		{"run", "osascript",
 			"-e", `tell application "Terminal"`,
 			"-e", "activate",
-			"-e", `do script "ssh 'prod-api'"`,
+			"-e", `do script "env -u LC_ALL ssh 'prod-api'"`,
 			"-e", "end tell"},
 	}
 	if !reflect.DeepEqual(runner.calls, want) {
@@ -77,7 +77,7 @@ func TestOpenSSHUsesITermWindowWithoutTmux(t *testing.T) {
 			"-e", `tell application "iTerm"`,
 			"-e", "activate",
 			"-e", `create window with default profile`,
-			"-e", `tell current session of current window to write text "ssh 'prod-api'"`,
+			"-e", `tell current session of current window to write text "env -u LC_ALL ssh 'prod-api'"`,
 			"-e", "end tell"},
 	}
 	if !reflect.DeepEqual(runner.calls, want) {
@@ -125,7 +125,7 @@ func TestOpenSSHUsesITermTabWhenWindowExists(t *testing.T) {
 			"-e", `tell application "iTerm"`,
 			"-e", "activate",
 			"-e", `tell current window to create tab with default profile`,
-			"-e", `tell current session of current window to write text "ssh 'prod-api'"`,
+			"-e", `tell current session of current window to write text "env -u LC_ALL ssh 'prod-api'"`,
 			"-e", "end tell"},
 	}
 	if !reflect.DeepEqual(runner.calls, want) {
@@ -154,7 +154,7 @@ func TestOpenSSHUsesITermSplitForAutoModeInsideITerm(t *testing.T) {
 			"-e", "activate",
 			"-e", `tell current session of current window`,
 			"-e", `set newSession to (split vertically with default profile)`,
-			"-e", `tell newSession to write text "ssh 'prod-api'"`,
+			"-e", `tell newSession to write text "env -u LC_ALL ssh 'prod-api'"`,
 			"-e", "end tell",
 			"-e", "end tell"},
 	}
@@ -186,7 +186,7 @@ func TestOpenSSHUsesITermTabForAutoModeOutsideITerm(t *testing.T) {
 			"-e", `tell application "iTerm"`,
 			"-e", "activate",
 			"-e", `tell current window to create tab with default profile`,
-			"-e", `tell current session of current window to write text "ssh 'prod-api'"`,
+			"-e", `tell current session of current window to write text "env -u LC_ALL ssh 'prod-api'"`,
 			"-e", "end tell"},
 	}
 	if !reflect.DeepEqual(runner.calls, want) {
@@ -239,7 +239,7 @@ func TestOpenSSHUsesITermWindowForTabWhenNoWindowExists(t *testing.T) {
 			"-e", `tell application "iTerm"`,
 			"-e", "activate",
 			"-e", `create window with default profile`,
-			"-e", `tell current session of current window to write text "ssh 'prod-api'"`,
+			"-e", `tell current session of current window to write text "env -u LC_ALL ssh 'prod-api'"`,
 			"-e", "end tell"},
 	}
 	if !reflect.DeepEqual(runner.calls, want) {
@@ -274,7 +274,7 @@ func TestOpenSSHUsesTerminalAppWindow(t *testing.T) {
 		{"run", "osascript",
 			"-e", `tell application "Terminal"`,
 			"-e", "activate",
-			"-e", `do script "ssh 'prod-api'"`,
+			"-e", `do script "env -u LC_ALL ssh 'prod-api'"`,
 			"-e", "end tell"},
 	}
 	if !reflect.DeepEqual(runner.calls, want) {
@@ -295,7 +295,7 @@ func TestOpenSSHUsesSshpassWhenPasswordIsProvided(t *testing.T) {
 		{"run", "osascript",
 			"-e", `tell application "Terminal"`,
 			"-e", "activate",
-			"-e", `do script "sshpass -p 'p@ss \"word\"' ssh 'prod-api'"`,
+			"-e", `do script "env -u LC_ALL sshpass -p 'p@ss \"word\"' ssh 'prod-api'"`,
 			"-e", "end tell"},
 	}
 	if !reflect.DeepEqual(runner.calls, want) {
@@ -317,7 +317,7 @@ func TestOpenSSHUsesTerminalAppTabWhenWindowExists(t *testing.T) {
 		{"run", "osascript",
 			"-e", `tell application "Terminal"`,
 			"-e", "activate",
-			"-e", `do script "ssh 'prod-api'" in front window`,
+			"-e", `do script "env -u LC_ALL ssh 'prod-api'" in front window`,
 			"-e", "end tell"},
 	}
 	if !reflect.DeepEqual(runner.calls, want) {
@@ -341,7 +341,7 @@ func TestOpenSSHUsesTerminalAppWindowForTabWhenNoWindowExists(t *testing.T) {
 		{"run", "osascript",
 			"-e", `tell application "Terminal"`,
 			"-e", "activate",
-			"-e", `do script "ssh 'prod-api'"`,
+			"-e", `do script "env -u LC_ALL ssh 'prod-api'"`,
 			"-e", "end tell"},
 	}
 	if !reflect.DeepEqual(runner.calls, want) {
@@ -359,7 +359,7 @@ func TestCLIBackendUsesArgumentArray(t *testing.T) {
 
 	want := [][]string{
 		{"output", "which", "wezterm"},
-		{"run", "wezterm", "start", "--new-window", "--", "ssh", `prod"api'one`},
+		{"run", "wezterm", "start", "--new-window", "--", "env", "-u", "LC_ALL", "ssh", `prod"api'one`},
 	}
 	if !reflect.DeepEqual(runner.calls, want) {
 		t.Fatalf("calls = %#v, want %#v", runner.calls, want)
@@ -376,7 +376,7 @@ func TestWezTermTabUsesNewTabFlag(t *testing.T) {
 
 	want := [][]string{
 		{"output", "which", "wezterm"},
-		{"run", "wezterm", "start", "--new-tab", "--", "ssh", "prod-api"},
+		{"run", "wezterm", "start", "--new-tab", "--", "env", "-u", "LC_ALL", "ssh", "prod-api"},
 	}
 	if !reflect.DeepEqual(runner.calls, want) {
 		t.Fatalf("calls = %#v, want %#v", runner.calls, want)
@@ -393,7 +393,7 @@ func TestKittyTabUsesRemoteControlLaunch(t *testing.T) {
 
 	want := [][]string{
 		{"output", "which", "kitty"},
-		{"run", "kitty", "@", "launch", "--type=tab", "ssh", "prod-api"},
+		{"run", "kitty", "@", "launch", "--type=tab", "env", "-u", "LC_ALL", "ssh", "prod-api"},
 	}
 	if !reflect.DeepEqual(runner.calls, want) {
 		t.Fatalf("calls = %#v, want %#v", runner.calls, want)
@@ -415,7 +415,7 @@ func TestGhosttyTabUsesAppleScriptWhenWindowExists(t *testing.T) {
 			"-e", `tell application "Ghostty"`,
 			"-e", "activate",
 			"-e", `set cfg to default configuration`,
-			"-e", `set command of cfg to "ssh 'prod-api'"`,
+			"-e", `set command of cfg to "env -u LC_ALL ssh 'prod-api'"`,
 			"-e", `tell front window to new tab with configuration cfg`,
 			"-e", "end tell"},
 	}
@@ -441,7 +441,7 @@ func TestGhosttyTabUsesWindowWhenNoWindowExists(t *testing.T) {
 			"-e", `tell application "Ghostty"`,
 			"-e", "activate",
 			"-e", `set cfg to default configuration`,
-			"-e", `set command of cfg to "ssh 'prod-api'"`,
+			"-e", `set command of cfg to "env -u LC_ALL ssh 'prod-api'"`,
 			"-e", `new window with configuration cfg`,
 			"-e", "end tell"},
 	}

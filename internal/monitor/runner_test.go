@@ -10,6 +10,7 @@ import (
 )
 
 func TestBuildProbeCmdKeyAuth(t *testing.T) {
+	t.Setenv("LC_ALL", "C.UTF-8")
 	cmd, err := buildProbeCmd(context.Background(), ProbeTarget{Alias: "host1"})
 	if err != nil {
 		t.Fatalf("buildProbeCmd error: %v", err)
@@ -29,9 +30,13 @@ func TestBuildProbeCmdKeyAuth(t *testing.T) {
 			t.Fatalf("key-auth probe should not set PreferredAuthentications: %v", args)
 		}
 	}
+	if containsEnv(cmd.Env, "LC_ALL") {
+		t.Fatalf("key-auth probe should not inherit LC_ALL: %v", cmd.Env)
+	}
 }
 
 func TestBuildProbeCmdPasswordAuth(t *testing.T) {
+	t.Setenv("LC_ALL", "C.UTF-8")
 	dir := t.TempDir()
 	stub := filepath.Join(dir, "sshpass")
 	if runtime.GOOS == "windows" {
@@ -75,6 +80,9 @@ func TestBuildProbeCmdPasswordAuth(t *testing.T) {
 	}
 	if !containsSequence(args, []string{"--", "host2", "sh -s"}) {
 		t.Fatalf("alias not at expected position: %v", args)
+	}
+	if containsEnv(cmd.Env, "LC_ALL") {
+		t.Fatalf("password probe should not inherit LC_ALL: %v", cmd.Env)
 	}
 }
 
@@ -128,6 +136,16 @@ func containsSequence(slice, want []string) bool {
 			}
 		}
 		if match {
+			return true
+		}
+	}
+	return false
+}
+
+func containsEnv(environ []string, name string) bool {
+	prefix := name + "="
+	for _, entry := range environ {
+		if strings.HasPrefix(entry, prefix) {
 			return true
 		}
 	}

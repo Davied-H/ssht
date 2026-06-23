@@ -54,6 +54,7 @@ type Model struct {
 	focus        focusKind
 	groupInline  groupInlineState
 	groupPicker  groupPickerState
+	command      commandPaletteState
 
 	showRawPreview bool
 	previewVisible bool
@@ -72,6 +73,8 @@ const (
 	modeGroupInline
 	modeGroupPicker
 	modeWarnings
+	modeHistory
+	modeCommandPalette
 )
 
 type focusKind int
@@ -91,6 +94,7 @@ const (
 	operationGroupMerge
 	operationGroupDelete
 	operationGroupMoveHosts
+	operationConnect
 )
 
 type formState struct {
@@ -126,6 +130,11 @@ type groupPickerState struct {
 	movingHosts []sshconfig.HostEntry
 }
 
+type commandPaletteState struct {
+	buffer string
+	cursor int
+}
+
 type pendingOperation struct {
 	operation   operationType
 	entry       sshconfig.HostEntry
@@ -149,6 +158,19 @@ type dashboardCounts struct {
 type groupItem struct {
 	Name  string
 	Count int
+}
+
+type commandEntry struct {
+	ID          string
+	Title       string
+	Description string
+}
+
+type historyRow struct {
+	Alias           string
+	Favorite        bool
+	ConnectCount    int
+	LastConnectedAt string
 }
 
 type ReloadedMsg struct {
@@ -286,6 +308,10 @@ func (m Model) dispatch(msg tea.Msg) (Model, tea.Cmd) {
 			return m.handleModeKey(msg)
 		}
 		return m.handleKey(msg)
+	case tea.MouseMsg:
+		if m.mode == modeBrowse {
+			return m.handleMouse(msg)
+		}
 	}
 	return m, nil
 }
@@ -359,7 +385,9 @@ func (m Model) handleKey(key tea.KeyMsg) (Model, tea.Cmd) {
 	case tea.KeyShiftTab:
 		return m, nil
 	case tea.KeyEnter:
-		return m, m.connectCmd()
+		return m.prepareConnect()
+	case tea.KeyCtrlK:
+		return m.startCommandPalette(), nil
 	case tea.KeySpace:
 		return m.toggleSelected(), nil
 	case tea.KeyUp:
@@ -391,8 +419,13 @@ func (m Model) handleKey(key tea.KeyMsg) (Model, tea.Cmd) {
 		switch key.String() {
 		case "q":
 			return m, tea.Quit
+		case ":":
+			return m.startCommandPalette(), nil
 		case "?":
 			m.showHelp = !m.showHelp
+		case "H":
+			m.mode = modeHistory
+			m.status = ""
 		case "W":
 			if len(m.warnings) == 0 {
 				m.status = "no warnings"
@@ -467,6 +500,112 @@ func (m Model) handleKey(key tea.KeyMsg) (Model, tea.Cmd) {
 		}
 	}
 	return m, nil
+}
+
+func (m Model) handleMouse(msg tea.MouseMsg) (Model, tea.Cmd) {
+	event := tea.MouseEvent(msg)
+	if event.Action != tea.MouseActionPress {
+		return m, nil
+	}
+	if event.Button == tea.MouseButtonWheelUp {
+		if m.focus == focusSidebar {
+			m.moveGroup(-1)
+		} else {
+			m.moveCursorBy(-1)
+		}
+		return m, nil
+	}
+	if event.Button == tea.MouseButtonWheelDown {
+		if m.focus == focusSidebar {
+			m.moveGroup(1)
+		} else {
+			m.moveCursorBy(1)
+		}
+		return m, nil
+	}
+	if event.Button != tea.MouseButtonLeft {
+		return m, nil
+	}
+
+	if event.Y == 1 {
+		return m.startSearch(), nil
+	}
+
+	sidebarW, listW, previewW := m.splitThreeColumns()
+	bodyY := event.Y - 2
+	if bodyY < 1 {
+		return m, nil
+	}
+	contentRow := bodyY - 1
+	bodyHeight := m.mouseBodyHeight()
+	if bodyHeight <= panelChromeHeight || contentRow < 0 || contentRow >= bodyHeight-panelChromeHeight {
+		return m, nil
+	}
+
+	x := event.X
+	switch {
+	case sidebarW > 0 && x >= 0 && x < sidebarW:
+		return m.clickSidebarRow(contentRow, bodyHeight), nil
+	case sidebarW > 0 && x >= sidebarW+2 && x < sidebarW+2+listW:
+		return m.clickListRow(contentRow, bodyHeight, listW), nil
+	case sidebarW == 0 && x >= 0 && x < listW:
+		return m.clickListRow(contentRow, bodyHeight, listW), nil
+	case previewW > 0:
+		return m, nil
+	}
+	return m, nil
+}
+
+func (m Model) mouseBodyHeight() int {
+	footerLines := m.footerLines()
+	if m.status != "" {
+		footerLines = append(footerLines, statusLine(m.status))
+	}
+	contentHeight := maxViewHeight
+	if m.height > 0 {
+		contentHeight = m.height - len(footerLines)
+	}
+	return remainingLines(contentHeight, 2)
+}
+
+func (m Model) clickSidebarRow(contentRow, bodyHeight int) Model {
+	items := m.groupItems()
+	if len(items) == 0 {
+		return m
+	}
+	rowBudget := bodyHeight - panelChromeHeight
+	start, end := visibleGroupRange(items, m.selectedGroup(), rowBudget)
+	index := start + contentRow
+	if index < start || index >= end || index >= len(items) {
+		return m
+	}
+	m.groupCursor = index
+	m.focus = focusSidebar
+	m.cursor = 0
+	m.applyFilter()
+	return m
+}
+
+func (m Model) clickListRow(contentRow, bodyHeight, panelWidth int) Model {
+	if len(m.filtered) == 0 {
+		return m
+	}
+	innerW := innerWidth(panelWidth)
+	headerRows := 0
+	if innerW >= 28 {
+		headerRows = 1
+	}
+	rowBudget := bodyHeight - panelChromeHeight - headerRows
+	start, visibleRows := visibleListRange(len(m.filtered), m.cursor, rowBudget)
+	index := start + contentRow - headerRows
+	if index < start || index >= start+visibleRows || index >= len(m.filtered) {
+		m.focus = focusList
+		return m
+	}
+	m.cursor = index
+	m.focus = focusList
+	m.searchActive = false
+	return m
 }
 
 func (m Model) startSearch() Model {
@@ -547,8 +686,15 @@ func (m Model) handleSidebarKey(key tea.KeyMsg) (Model, tea.Cmd) {
 		switch key.String() {
 		case "q":
 			return m, tea.Quit
+		case ":":
+			m.focus = focusList
+			return m.startCommandPalette(), nil
 		case "?":
 			m.showHelp = !m.showHelp
+			return m, nil
+		case "H":
+			m.mode = modeHistory
+			m.status = ""
 			return m, nil
 		case "W":
 			if len(m.warnings) == 0 {
@@ -757,6 +903,12 @@ func (m Model) handleModeKey(key tea.KeyMsg) (Model, tea.Cmd) {
 	if m.mode == modeWarnings {
 		return m.handleWarningsKey(key)
 	}
+	if m.mode == modeHistory {
+		return m.handleHistoryKey(key)
+	}
+	if m.mode == modeCommandPalette {
+		return m.handleCommandPaletteKey(key)
+	}
 	switch key.Type {
 	case tea.KeyCtrlC:
 		return m, tea.Quit
@@ -821,6 +973,12 @@ func (m Model) handleModeKey(key tea.KeyMsg) (Model, tea.Cmd) {
 		}
 	case tea.KeyRunes:
 		if key.String() == "s" && m.mode == modeConfirm {
+			if m.pending.operation == operationConnect {
+				m.mode = modeBrowse
+				m.pending = pendingOperation{}
+				m.status = ""
+				return m, m.connectCmd()
+			}
 			return m, m.writePendingCmd()
 		}
 		if m.mode == modeForm {
@@ -848,6 +1006,75 @@ func (m Model) handleWarningsKey(key tea.KeyMsg) (Model, tea.Cmd) {
 			m.status = ""
 			return m, nil
 		}
+	}
+	return m, nil
+}
+
+func (m Model) handleHistoryKey(key tea.KeyMsg) (Model, tea.Cmd) {
+	switch key.Type {
+	case tea.KeyCtrlC:
+		return m, tea.Quit
+	case tea.KeyEsc, tea.KeyEnter:
+		m.mode = modeBrowse
+		m.status = ""
+		return m, nil
+	case tea.KeyRunes:
+		switch key.String() {
+		case "q":
+			return m, tea.Quit
+		case "H", "?":
+			m.mode = modeBrowse
+			m.status = ""
+			return m, nil
+		}
+	}
+	return m, nil
+}
+
+func (m Model) handleCommandPaletteKey(key tea.KeyMsg) (Model, tea.Cmd) {
+	switch key.Type {
+	case tea.KeyCtrlC:
+		return m, tea.Quit
+	case tea.KeyEsc:
+		m.mode = modeBrowse
+		m.command = commandPaletteState{}
+		m.status = ""
+		return m, nil
+	case tea.KeyEnter:
+		return m.runCommandPaletteSelection()
+	case tea.KeyUp:
+		m.moveCommandCursor(-1)
+		return m, nil
+	case tea.KeyDown:
+		m.moveCommandCursor(1)
+		return m, nil
+	case tea.KeyBackspace, tea.KeyDelete:
+		runes := []rune(m.command.buffer)
+		if len(runes) > 0 {
+			m.command.buffer = string(runes[:len(runes)-1])
+			m.command.cursor = 0
+		}
+		return m, nil
+	case tea.KeyCtrlU:
+		m.command.buffer = ""
+		m.command.cursor = 0
+		return m, nil
+	case tea.KeyRunes:
+		switch key.String() {
+		case "j":
+			if m.command.buffer == "" {
+				m.moveCommandCursor(1)
+				return m, nil
+			}
+		case "k":
+			if m.command.buffer == "" {
+				m.moveCommandCursor(-1)
+				return m, nil
+			}
+		}
+		m.command.buffer += key.String()
+		m.command.cursor = 0
+		return m, nil
 	}
 	return m, nil
 }
@@ -1303,6 +1530,176 @@ func (m Model) connectCmd() tea.Cmd {
 	}
 }
 
+func (m Model) prepareConnect() (Model, tea.Cmd) {
+	hosts := m.connectHostEntries()
+	if len(hosts) == 0 {
+		m.status = "no host selected"
+		return m, nil
+	}
+	return m, m.connectCmd()
+}
+
+func (m Model) connectHostEntries() []sshconfig.HostEntry {
+	if len(m.selected) == 0 {
+		entry, ok := m.Selected()
+		if !ok {
+			return nil
+		}
+		return []sshconfig.HostEntry{entry}
+	}
+	hosts := make([]sshconfig.HostEntry, 0, len(m.selected))
+	for _, entry := range m.entries {
+		if m.selected[entry.Alias] {
+			hosts = append(hosts, entry)
+		}
+	}
+	sort.Slice(hosts, func(i, j int) bool { return hosts[i].Alias < hosts[j].Alias })
+	return hosts
+}
+
+func (m Model) startCommandPalette() Model {
+	m.mode = modeCommandPalette
+	m.command = commandPaletteState{}
+	m.status = ""
+	return m
+}
+
+func (m Model) commandEntries() []commandEntry {
+	entries := []commandEntry{
+		{ID: "connect", Title: "Connect", Description: "Open the selected or marked host(s)"},
+		{ID: "edit", Title: "Edit host", Description: "Edit the selected Host block"},
+		{ID: "move", Title: "Move to group", Description: "Move selected or marked host(s)"},
+		{ID: "refresh-monitor", Title: "Refresh monitor", Description: "Probe the selected host now"},
+		{ID: "source", Title: "Show source", Description: "Show source config path and line"},
+		{ID: "warnings", Title: "Show warnings", Description: "Open parser warnings"},
+		{ID: "history", Title: "Show history", Description: "Recent and frequent connections"},
+		{ID: "reload", Title: "Reload config", Description: "Reload SSH config files"},
+		{ID: "favorite", Title: "Toggle favorite", Description: "Favorite or unfavorite selected host"},
+	}
+	query := strings.ToLower(strings.TrimSpace(m.command.buffer))
+	if query == "" {
+		return entries
+	}
+	var filtered []commandEntry
+	for _, entry := range entries {
+		haystack := strings.ToLower(entry.Title + " " + entry.Description + " " + entry.ID)
+		if strings.Contains(haystack, query) || fuzzyContains(haystack, query) {
+			filtered = append(filtered, entry)
+		}
+	}
+	return filtered
+}
+
+func (m Model) historyRows() []historyRow {
+	rows := make([]historyRow, 0, len(m.state.Hosts))
+	known := map[string]bool{}
+	for _, entry := range m.entries {
+		known[entry.Alias] = true
+	}
+	for alias, host := range m.state.Hosts {
+		if host.ConnectCount == 0 && host.LastConnectedAt == "" && !host.Favorite {
+			continue
+		}
+		if !known[alias] {
+			continue
+		}
+		rows = append(rows, historyRow{
+			Alias:           alias,
+			Favorite:        host.Favorite,
+			ConnectCount:    host.ConnectCount,
+			LastConnectedAt: host.LastConnectedAt,
+		})
+	}
+	sort.SliceStable(rows, func(i, j int) bool {
+		if rows[i].LastConnectedAt != rows[j].LastConnectedAt {
+			return rows[i].LastConnectedAt > rows[j].LastConnectedAt
+		}
+		if rows[i].ConnectCount != rows[j].ConnectCount {
+			return rows[i].ConnectCount > rows[j].ConnectCount
+		}
+		return rows[i].Alias < rows[j].Alias
+	})
+	return rows
+}
+
+func (m *Model) moveCommandCursor(delta int) {
+	entries := m.commandEntries()
+	if len(entries) == 0 {
+		m.command.cursor = 0
+		return
+	}
+	m.command.cursor += delta
+	if m.command.cursor < 0 {
+		m.command.cursor = len(entries) - 1
+	}
+	if m.command.cursor >= len(entries) {
+		m.command.cursor = 0
+	}
+}
+
+func (m Model) runCommandPaletteSelection() (Model, tea.Cmd) {
+	entries := m.commandEntries()
+	if len(entries) == 0 {
+		m.status = "no command matches"
+		return m, nil
+	}
+	cursor := m.command.cursor
+	if cursor < 0 || cursor >= len(entries) {
+		cursor = 0
+	}
+	selected := entries[cursor]
+	m.mode = modeBrowse
+	m.command = commandPaletteState{}
+	switch selected.ID {
+	case "connect":
+		return m.prepareConnect()
+	case "edit":
+		entry, ok := m.Selected()
+		if !ok {
+			m.status = "no host selected"
+			return m, nil
+		}
+		values := formFromEntry(entry)
+		m.mode = modeForm
+		m.status = ""
+		m.form = formState{operation: operationEdit, entry: entry, values: values, cursor: formFieldLen(values, 0)}
+		return m, nil
+	case "move":
+		return m.startGroupPicker()
+	case "refresh-monitor":
+		return m.refreshMonitor()
+	case "source":
+		entry, ok := m.Selected()
+		if !ok {
+			m.status = "no host selected"
+			return m, nil
+		}
+		if entry.SourceFile == "" {
+			m.status = "source unavailable"
+			return m, nil
+		}
+		m.status = fmt.Sprintf("source %s:%d", entry.SourceFile, entry.SourceLine)
+		return m, nil
+	case "warnings":
+		if len(m.warnings) == 0 {
+			m.status = "no warnings"
+			return m, nil
+		}
+		m.mode = modeWarnings
+		m.status = ""
+		return m, nil
+	case "history":
+		m.mode = modeHistory
+		m.status = ""
+		return m, nil
+	case "reload":
+		return m, m.reloadCmd()
+	case "favorite":
+		return m.toggleFavorite()
+	}
+	return m, nil
+}
+
 func (m *Model) applyFilter() {
 	query := strings.ToLower(strings.TrimSpace(m.filter))
 	selectedGroup := m.selectedGroup()
@@ -1330,31 +1727,37 @@ func (m Model) matches(entry sshconfig.HostEntry, query string) bool {
 		entry.HostName,
 		entry.User,
 		entry.Port,
+		entry.IdentityFile,
 		entry.ProxyJump,
+		entry.ProxyCommand,
 		entry.SourceFile,
 		strings.Join(entry.Tags, " "),
 	}, " "))
 	parts := strings.Fields(query)
 	for _, part := range parts {
+		negated := false
+		if strings.HasPrefix(part, "-") && len(part) > 1 {
+			negated = true
+			part = strings.TrimPrefix(part, "-")
+		}
+		matched := false
 		if tag, ok := strings.CutPrefix(part, "tag:"); ok {
-			if !hasTag(entry, tag) {
-				return false
-			}
-			continue
+			matched = hasTag(entry, tag)
+		} else if key, value, ok := strings.Cut(part, ":"); ok && isStructuredSearchKey(key) {
+			matched = structuredFieldMatches(entry, key, value)
+		} else if part == "fav:" {
+			matched = m.state.Hosts[entry.Alias].Favorite
+		} else if part == "recent:" {
+			matched = m.state.Hosts[entry.Alias].LastConnectedAt != ""
+		} else if negated {
+			matched = strings.Contains(haystack, part)
+		} else {
+			matched = strings.Contains(haystack, part) || fuzzyContains(haystack, part)
 		}
-		if part == "fav:" {
-			if !m.state.Hosts[entry.Alias].Favorite {
-				return false
-			}
-			continue
+		if negated {
+			matched = !matched
 		}
-		if part == "recent:" {
-			if m.state.Hosts[entry.Alias].LastConnectedAt == "" {
-				return false
-			}
-			continue
-		}
-		if !strings.Contains(haystack, part) && !fuzzyContains(haystack, part) {
+		if !matched {
 			return false
 		}
 	}
@@ -1367,6 +1770,11 @@ func (m Model) less(a, b sshconfig.HostEntry) bool {
 		bRank := m.matchRank(b)
 		if aRank != bRank {
 			return aRank < bRank
+		}
+		aContext := m.searchContext(a, m.filter)
+		bContext := m.searchContext(b, m.filter)
+		if aContext != bContext {
+			return aContext < bContext
 		}
 	}
 	aState := m.state.Hosts[a.Alias]
@@ -1439,16 +1847,181 @@ func searchTermRank(entry sshconfig.HostEntry, term string) int {
 	}
 }
 
+func (m Model) searchContext(entry sshconfig.HostEntry, query string) string {
+	query = strings.ToLower(strings.TrimSpace(query))
+	if query == "" {
+		return ""
+	}
+	for _, part := range strings.Fields(query) {
+		part = strings.TrimPrefix(part, "-")
+		switch {
+		case part == "fav:" && m.state.Hosts[entry.Alias].Favorite:
+			return "favorite"
+		case part == "recent:" && m.state.Hosts[entry.Alias].LastConnectedAt != "":
+			return "recent"
+		case strings.HasPrefix(part, "tag:"):
+			value := strings.TrimPrefix(part, "tag:")
+			if tag := matchingListValue(entry.Tags, value); tag != "" {
+				return "tag " + tag
+			}
+		default:
+			if key, value, ok := strings.Cut(part, ":"); ok && isStructuredSearchKey(key) {
+				if context := structuredFieldContext(entry, key, value); context != "" {
+					return context
+				}
+			}
+		}
+	}
+	for _, term := range textSearchTerms(query) {
+		if context := textFieldContext(entry, term); context != "" {
+			return context
+		}
+	}
+	return ""
+}
+
 func textSearchTerms(query string) []string {
 	parts := strings.Fields(strings.ToLower(strings.TrimSpace(query)))
 	terms := make([]string, 0, len(parts))
 	for _, part := range parts {
-		if strings.HasPrefix(part, "tag:") || part == "fav:" || part == "recent:" {
+		check := strings.TrimPrefix(part, "-")
+		if strings.HasPrefix(check, "tag:") || check == "fav:" || check == "recent:" {
 			continue
 		}
-		terms = append(terms, part)
+		if key, _, ok := strings.Cut(check, ":"); ok && isStructuredSearchKey(key) {
+			continue
+		}
+		terms = append(terms, check)
 	}
 	return terms
+}
+
+func isStructuredSearchKey(key string) bool {
+	switch key {
+	case "alias", "host", "hostname", "user", "port", "group", "jump", "proxy", "file", "source", "identity", "key":
+		return true
+	default:
+		return false
+	}
+}
+
+func structuredFieldMatches(entry sshconfig.HostEntry, key, value string) bool {
+	value = strings.ToLower(strings.TrimSpace(value))
+	if value == "" {
+		return false
+	}
+	contains := func(field string) bool {
+		return strings.Contains(strings.ToLower(field), value)
+	}
+	switch key {
+	case "alias":
+		return contains(entry.Alias)
+	case "host", "hostname":
+		return contains(entry.HostName)
+	case "user":
+		return contains(entry.User)
+	case "port":
+		return contains(entry.Port)
+	case "group":
+		if value == "ungrouped" {
+			return strings.TrimSpace(entry.Group) == ""
+		}
+		return contains(entry.Group)
+	case "jump":
+		return contains(entry.ProxyJump)
+	case "proxy":
+		return contains(entry.ProxyJump) || contains(entry.ProxyCommand)
+	case "file", "source":
+		return contains(entry.SourceFile)
+	case "identity", "key":
+		return contains(entry.IdentityFile)
+	default:
+		return false
+	}
+}
+
+func structuredFieldContext(entry sshconfig.HostEntry, key, value string) string {
+	value = strings.ToLower(strings.TrimSpace(value))
+	if value == "" {
+		return ""
+	}
+	switch key {
+	case "alias":
+		return matchingFieldContext("alias", entry.Alias, value)
+	case "host", "hostname":
+		return matchingFieldContext("host", entry.HostName, value)
+	case "user":
+		return matchingFieldContext("user", entry.User, value)
+	case "port":
+		return matchingFieldContext("port", entry.Port, value)
+	case "group":
+		if value == "ungrouped" && strings.TrimSpace(entry.Group) == "" {
+			return "ungrouped"
+		}
+		return matchingFieldContext("group", entry.Group, value)
+	case "jump":
+		return matchingFieldContext("jump", entry.ProxyJump, value)
+	case "proxy":
+		if context := matchingFieldContext("jump", entry.ProxyJump, value); context != "" {
+			return context
+		}
+		return matchingFieldContext("proxy", entry.ProxyCommand, value)
+	case "file", "source":
+		return matchingFieldContext("file", entry.SourceFile, value)
+	case "identity", "key":
+		return matchingFieldContext("key", entry.IdentityFile, value)
+	default:
+		return ""
+	}
+}
+
+func textFieldContext(entry sshconfig.HostEntry, term string) string {
+	fields := []struct {
+		label string
+		value string
+	}{
+		{"alias", entry.Alias},
+		{"group", entry.Group},
+		{"tag", matchingListValue(entry.Tags, term)},
+		{"host", entry.HostName},
+		{"user", entry.User},
+		{"port", entry.Port},
+		{"jump", entry.ProxyJump},
+		{"proxy", entry.ProxyCommand},
+		{"file", entry.SourceFile},
+		{"key", entry.IdentityFile},
+	}
+	for _, field := range fields {
+		if context := matchingFieldContext(field.label, field.value, term); context != "" {
+			return context
+		}
+	}
+	for _, field := range fields {
+		if field.value != "" && fuzzyContains(field.value, term) {
+			return field.label + " " + field.value
+		}
+	}
+	return ""
+}
+
+func matchingListValue(values []string, term string) string {
+	term = strings.ToLower(strings.TrimSpace(term))
+	for _, value := range values {
+		if strings.Contains(strings.ToLower(value), term) {
+			return value
+		}
+	}
+	return ""
+}
+
+func matchingFieldContext(label, value, term string) string {
+	if value == "" || term == "" {
+		return ""
+	}
+	if strings.Contains(strings.ToLower(value), strings.ToLower(term)) {
+		return label + " " + value
+	}
+	return ""
 }
 
 func fuzzyContains(haystack, needle string) bool {
@@ -1670,6 +2243,56 @@ func (m Model) listPageSize() int {
 		return 1
 	}
 	return page
+}
+
+func visibleGroupRange(items []groupItem, selected string, rowBudget int) (int, int) {
+	if rowBudget <= 0 || len(items) == 0 {
+		return 0, 0
+	}
+	start := 0
+	if len(items) > rowBudget {
+		for i, item := range items {
+			if item.Name == selected {
+				start = i - rowBudget/2
+				break
+			}
+		}
+		if start < 0 {
+			start = 0
+		}
+		if maxStart := len(items) - rowBudget; start > maxStart {
+			start = maxStart
+		}
+	}
+	end := start + rowBudget
+	if end > len(items) {
+		end = len(items)
+	}
+	return start, end
+}
+
+func visibleListRange(total, cursor, rowBudget int) (start, visible int) {
+	if rowBudget <= 0 || total <= 0 {
+		return 0, 0
+	}
+	visible = rowBudget
+	if total > visible && visible > 1 {
+		visible--
+	}
+	start = 0
+	if total > visible {
+		start = cursor - visible/2
+		if start < 0 {
+			start = 0
+		}
+		if maxStart := total - visible; start > maxStart {
+			start = maxStart
+		}
+	}
+	if visible > total-start {
+		visible = total - start
+	}
+	return start, visible
 }
 
 func statusFromWarnings(warnings []sshconfig.Warning) string {

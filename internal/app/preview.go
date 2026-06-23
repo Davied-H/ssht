@@ -2,6 +2,7 @@ package app
 
 import (
 	"fmt"
+	"net"
 	"strings"
 	"time"
 
@@ -75,8 +76,14 @@ func (m Model) previewLines(maxLines, width int) []string {
 
 	lines := renderPreviewHeader(entry, mstate, width, showMonitor)
 
-	if hist := renderHistorySection(entry, hostState, width); len(hist) > 0 {
-		lines = append(lines, hist...)
+	if sections := renderConnectionSections(entry, hostState, width); len(sections) > 0 {
+		lines = append(lines, "")
+		lines = append(lines, sections...)
+	}
+
+	if risks := renderRiskSection(entry, width); len(risks) > 0 {
+		lines = append(lines, "")
+		lines = append(lines, risks...)
 	}
 
 	if showMonitor {
@@ -100,8 +107,9 @@ func (m Model) previewLines(maxLines, width int) []string {
 	return fitLines(lines, maxLines)
 }
 
-// renderPreviewHeader produces the alias / state-dot / connection-identity rows
-// at the very top of the preview pane.
+// renderPreviewHeader produces the alias / state-dot row at the very top of the
+// preview pane. Connection details are grouped below so the preview reads like a
+// deliberate pre-connect confirmation panel.
 func renderPreviewHeader(entry sshconfig.HostEntry, state monitorState, width int, hasMonitor bool) []string {
 	bar := accentStyle.Render("▎ ")
 	chip := monitorStateChip(state)
@@ -113,7 +121,7 @@ func renderPreviewHeader(entry sshconfig.HostEntry, state monitorState, width in
 	if titleRoom < 1 {
 		titleRoom = 1
 	}
-	title := titleStyle.Render(truncate(entry.Alias, titleRoom))
+	title := brandStyle.Render(truncate(entry.Alias, titleRoom))
 	headerLeft := bar + title
 
 	var first string
@@ -123,46 +131,46 @@ func renderPreviewHeader(entry sshconfig.HostEntry, state monitorState, width in
 		first = headerLeft
 	}
 
-	lines := []string{first}
+	return []string{first}
+}
 
+func renderConnectionSections(entry sshconfig.HostEntry, hostState state.HostState, width int) []string {
+	var lines []string
 	conn := connectionString(entry)
-	if conn != "" {
-		lines = append(lines, indented(truncate(conn, max(width-previewBodyIndent, 1))))
+	if conn == "" {
+		conn = entry.Alias
 	}
+	lines = append(lines, barInfoRow("Target", conn, width))
 
-	secondParts := []string{}
+	if entry.Group != "" {
+		lines = append(lines, barInfoRow("Group", entry.Group, width))
+	}
+	if len(entry.Tags) > 0 {
+		lines = append(lines, barInfoRow("Tags", strings.Join(entry.Tags, " "), width))
+	}
+	auth := "OpenSSH config"
 	if entry.IdentityFile != "" {
-		secondParts = append(secondParts, entry.IdentityFile)
+		auth = "IdentityFile " + entry.IdentityFile
 	}
+	if entry.SSHPassword != "" {
+		auth = "password via sshpass"
+	}
+	lines = append(lines, barInfoRow("Auth", auth, width))
+
+	route := "direct"
 	if entry.ProxyJump != "" {
-		secondParts = append(secondParts, mutedStyle.Render("proxy: ")+entry.ProxyJump)
+		route = "ProxyJump " + entry.ProxyJump
+	} else if entry.ProxyCommand != "" {
+		route = "ProxyCommand " + entry.ProxyCommand
 	}
-	if len(secondParts) > 0 {
-		joined := strings.Join(secondParts, mutedStyle.Render("  ·  "))
-		lines = append(lines, indented(truncate(joined, max(width-previewBodyIndent, 1))))
-	}
+	lines = append(lines, barInfoRow("Route", route, width))
 
-	// Edge case: alias-only host (no HostName/User/Port/Identity/ProxyJump).
-	// Fall back to the legacy per-field layout so the preview is never empty.
-	if conn == "" && len(secondParts) == 0 {
-		fallbackFields := []struct{ k, v string }{
-			{"HostName", entry.HostName},
-			{"Port", entry.Port},
-			{"User", entry.User},
-			{"Identity", entry.IdentityFile},
-			{"ProxyJump", entry.ProxyJump},
-		}
-		for _, kv := range fallbackFields {
-			if kv.v != "" {
-				lines = append(lines, formatField(kv.k, kv.v, width))
-			}
-		}
+	if history := buildHistoryString(entry, hostState); history != "" {
+		lines = append(lines, barInfoRow("History", history, width))
 	}
-
-	if entry.ProxyCommand != "" {
-		lines = append(lines, formatField("ProxyCmd", entry.ProxyCommand, width))
+	if entry.SourceFile != "" {
+		lines = append(lines, barInfoRow("Source", fmt.Sprintf("%s:%d", entry.SourceFile, entry.SourceLine), width))
 	}
-
 	return lines
 }
 
@@ -179,12 +187,12 @@ func renderHistorySection(entry sshconfig.HostEntry, hostState state.HostState, 
 	}
 	out := []string{}
 	if historyValue != "" {
-		out = append(out, borderedInfoRow("History", historyValue, width))
+		out = append(out, barInfoRow("History", historyValue, width))
 	}
 	if source != "" {
-		out = append(out, borderedInfoRow("Source", source, width))
+		out = append(out, barInfoRow("Source", source, width))
 	}
-	return borderedBlock(out, width)
+	return out
 }
 
 // renderHealthSection renders the Health header plus uptime/load/mem/disk/conns
@@ -308,17 +316,81 @@ func buildHistoryString(entry sshconfig.HostEntry, hostState state.HostState) st
 	if hostState.Favorite {
 		bits = append(bits, "★")
 	}
-	if len(entry.Tags) > 0 {
-		bits = append(bits, "tags: "+strings.Join(entry.Tags, " "))
-	}
-	if entry.Group != "" {
-		bits = append(bits, "group: "+entry.Group)
-	}
 	if len(bits) == 0 {
 		// Surface "never connected" hint so the row isn't dropped silently.
 		return ""
 	}
 	return strings.Join(bits, " · ")
+}
+
+func renderRiskSection(entry sshconfig.HostEntry, width int) []string {
+	risks := connectionRisks(entry)
+	if len(risks) == 0 {
+		return []string{barInfoRow("Risk", liveStyle.Render("no obvious risk flags"), width)}
+	}
+	return []string{barInfoRow("Risk", warnStyle.Render(strings.Join(risks, " · ")), width)}
+}
+
+func connectionRisks(entry sshconfig.HostEntry) []string {
+	var risks []string
+	if strings.EqualFold(entry.User, "root") {
+		risks = append(risks, "root login")
+	}
+	if isPublicHost(entry.HostName) {
+		risks = append(risks, "public ip")
+	}
+	if looksProduction(entry) {
+		risks = append(risks, "production")
+	}
+	if entry.ProxyJump != "" || entry.ProxyCommand != "" {
+		risks = append(risks, "routed connection")
+	}
+	return risks
+}
+
+func connectionConfirmRisks(entry sshconfig.HostEntry) []string {
+	var risks []string
+	if strings.EqualFold(entry.User, "root") {
+		risks = append(risks, "root login")
+	}
+	if hasRiskWord(entry.Group) {
+		risks = append(risks, "production group")
+	}
+	for _, tag := range entry.Tags {
+		if hasRiskWord(tag) {
+			risks = append(risks, "critical tag")
+			break
+		}
+	}
+	return risks
+}
+
+func looksProduction(entry sshconfig.HostEntry) bool {
+	values := []string{entry.Alias, entry.Group}
+	values = append(values, entry.Tags...)
+	for _, value := range values {
+		lower := strings.ToLower(value)
+		if strings.Contains(lower, "prod") || strings.Contains(lower, "production") {
+			return true
+		}
+	}
+	return false
+}
+
+func hasRiskWord(value string) bool {
+	lower := strings.ToLower(strings.TrimSpace(value))
+	return lower == "prod" || lower == "production" || lower == "critical"
+}
+
+func isPublicHost(host string) bool {
+	ip := net.ParseIP(strings.TrimSpace(host))
+	if ip == nil {
+		return false
+	}
+	if ip.IsLoopback() || ip.IsPrivate() || ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast() || ip.IsUnspecified() {
+		return false
+	}
+	return true
 }
 
 func monitorStateChip(state monitorState) string {
@@ -523,6 +595,13 @@ func indented(s string) string {
 
 func max(a, b int) int {
 	if a > b {
+		return a
+	}
+	return b
+}
+
+func min(a, b int) int {
+	if a < b {
 		return a
 	}
 	return b

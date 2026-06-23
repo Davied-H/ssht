@@ -11,8 +11,11 @@ import (
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
+	"github.com/muesli/termenv"
 
 	"github.com/dong/ssht/internal/app"
+	"github.com/dong/ssht/internal/doctor"
 	"github.com/dong/ssht/internal/monitor"
 	"github.com/dong/ssht/internal/sshconfig"
 	"github.com/dong/ssht/internal/state"
@@ -23,6 +26,7 @@ type options struct {
 	ConfigPath     string
 	NoInclude      bool
 	PrintHosts     bool
+	Doctor         bool
 	ConnectHost    string
 	Debug          bool
 	Terminal       string
@@ -59,6 +63,17 @@ func main() {
 		return
 	}
 
+	if options.Doctor {
+		findings := doctor.Check(entries, warnings)
+		fmt.Print(doctor.Format(findings))
+		for _, finding := range findings {
+			if finding.Severity == doctor.SeverityError {
+				os.Exit(1)
+			}
+		}
+		return
+	}
+
 	if options.ConnectHost != "" {
 		if err := connectHost(options.ConnectHost, entries, options); err != nil {
 			exitErr(err)
@@ -90,6 +105,7 @@ func main() {
 		}
 	}
 
+	enableTUIColorProfile()
 	model := app.NewModel(app.Config{
 		ConfigPath:     options.ConfigPath,
 		Entries:        entries,
@@ -102,9 +118,13 @@ func main() {
 		Probe:          probeFn,
 		MonitorVisible: options.Monitor,
 	})
-	if _, err := tea.NewProgram(model, tea.WithAltScreen()).Run(); err != nil {
+	if _, err := tea.NewProgram(model, tea.WithAltScreen(), tea.WithMouseCellMotion()).Run(); err != nil {
 		exitErr(err)
 	}
+}
+
+func enableTUIColorProfile() {
+	lipgloss.SetColorProfile(termenv.TrueColor)
 }
 
 func hasPasswordHost(entries []sshconfig.HostEntry) bool {
@@ -124,10 +144,15 @@ func parseOptions(args []string) (options, error) {
 		MonitorTTL:     30 * time.Second,
 		MonitorTimeout: 5 * time.Second,
 	}
+	if len(args) > 0 && args[0] == "doctor" {
+		opts.Doctor = true
+		args = args[1:]
+	}
 	flags := flag.NewFlagSet("ssht", flag.ContinueOnError)
 	flags.StringVar(&opts.ConfigPath, "config", opts.ConfigPath, "path to ssh config")
 	flags.BoolVar(&opts.NoInclude, "no-include", false, "disable Include parsing")
 	flags.BoolVar(&opts.PrintHosts, "print-hosts", false, "print discovered hosts as JSON")
+	flags.BoolVar(&opts.Doctor, "doctor", opts.Doctor, "run SSH config health checks and exit")
 	flags.StringVar(&opts.ConnectHost, "connect", "", "open an SSH connection for the given Host alias without starting the TUI")
 	flags.BoolVar(&opts.Debug, "debug", false, "print parser warnings to stderr")
 	flags.StringVar(&opts.Terminal, "terminal", opts.Terminal, "terminal backend: auto, iterm, terminal, wezterm, kitty, alacritty, ghostty")
