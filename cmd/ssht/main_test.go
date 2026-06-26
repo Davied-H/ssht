@@ -88,6 +88,19 @@ func TestParseOptionsFlagOverridesOpenModeEnvironment(t *testing.T) {
 	}
 }
 
+func TestParseOptionsAcceptsSplitOpenMode(t *testing.T) {
+	t.Setenv("SSHT_TERMINAL", "")
+	t.Setenv("SSHT_OPEN_MODE", "")
+
+	options, err := parseOptions([]string{"--open-mode", "split"})
+	if err != nil {
+		t.Fatalf("parseOptions returned error: %v", err)
+	}
+	if options.OpenMode != "split" {
+		t.Fatalf("open mode = %q, want split", options.OpenMode)
+	}
+}
+
 func TestParseOptionsRejectsInvalidOpenMode(t *testing.T) {
 	t.Setenv("SSHT_TERMINAL", "")
 	t.Setenv("SSHT_OPEN_MODE", "")
@@ -96,7 +109,7 @@ func TestParseOptionsRejectsInvalidOpenMode(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected invalid open mode error")
 	}
-	if got := err.Error(); !strings.Contains(got, "auto, window, tab") {
+	if got := err.Error(); !strings.Contains(got, "auto, window, tab, split") {
 		t.Fatalf("error = %q, want supported modes", got)
 	}
 }

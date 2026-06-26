@@ -1337,6 +1337,102 @@ func TestManualMonitorRefreshOpensPanelAndProbes(t *testing.T) {
 	}
 }
 
+func TestSettingsShortcutOpensSettingsMode(t *testing.T) {
+	model := NewModel(Config{Entries: []sshconfig.HostEntry{{Alias: "prod"}}})
+
+	model, _ = model.update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("o")})
+
+	if model.mode != modeSettings {
+		t.Fatalf("mode = %v, want settings", model.mode)
+	}
+	if model.settings.openMode != "auto" || model.settings.terminal != "auto" {
+		t.Fatalf("settings = %#v, want default auto values", model.settings)
+	}
+}
+
+func TestSettingsSaveUpdatesStateManagerAndVisibility(t *testing.T) {
+	statePath := filepath.Join(t.TempDir(), "state.json")
+	model := NewModel(Config{
+		Entries:   []sshconfig.HostEntry{{Alias: "prod"}},
+		StatePath: statePath,
+		Manager: terminal.Manager{
+			Runner: &countingRunner{},
+		},
+	})
+
+	model, _ = model.update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("o")})
+	model, _ = model.update(tea.KeyMsg{Type: tea.KeyRight})
+	model, _ = model.update(tea.KeyMsg{Type: tea.KeyDown})
+	model, _ = model.update(tea.KeyMsg{Type: tea.KeyRight})
+	model, _ = model.update(tea.KeyMsg{Type: tea.KeyDown})
+	model, _ = model.update(tea.KeyMsg{Type: tea.KeySpace})
+	model, _ = model.update(tea.KeyMsg{Type: tea.KeyDown})
+	model, _ = model.update(tea.KeyMsg{Type: tea.KeySpace})
+	model, _ = model.update(tea.KeyMsg{Type: tea.KeyDown})
+	var cmd tea.Cmd
+	model, cmd = model.update(tea.KeyMsg{Type: tea.KeySpace})
+	if cmd != nil {
+		t.Fatal("space should not save settings")
+	}
+	model, cmd = model.update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("s")})
+	if cmd == nil {
+		t.Fatal("expected settings save command")
+	}
+	if model.mode != modeBrowse {
+		t.Fatalf("mode = %v, want browse", model.mode)
+	}
+	if model.manager.Preference != "iterm" || model.manager.OpenMode != terminal.OpenModeSplit {
+		t.Fatalf("manager = %#v, want iterm split", model.manager)
+	}
+	if model.previewVisible || !model.showRawPreview || !model.monitorVisible {
+		t.Fatalf("visibility preview=%v raw=%v monitor=%v, want false true true", model.previewVisible, model.showRawPreview, model.monitorVisible)
+	}
+	if model.state.Settings == nil || model.state.Settings.OpenMode != "split" || model.state.Settings.Terminal != "iterm" {
+		t.Fatalf("state settings = %#v, want iterm split", model.state.Settings)
+	}
+	model, _ = model.update(cmd())
+	loaded, err := state.Load(statePath)
+	if err != nil {
+		t.Fatalf("load saved state: %v", err)
+	}
+	if loaded.Settings == nil || loaded.Settings.OpenMode != "split" || loaded.Settings.Terminal != "iterm" {
+		t.Fatalf("saved settings = %#v, want iterm split", loaded.Settings)
+	}
+}
+
+func TestSettingsEscCancelsWithoutSaving(t *testing.T) {
+	model := NewModel(Config{Entries: []sshconfig.HostEntry{{Alias: "prod"}}})
+	originalOpenMode := model.manager.OpenMode
+
+	model, _ = model.update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("o")})
+	model, _ = model.update(tea.KeyMsg{Type: tea.KeyRight})
+	model, _ = model.update(tea.KeyMsg{Type: tea.KeyEsc})
+
+	if model.mode != modeBrowse {
+		t.Fatalf("mode = %v, want browse", model.mode)
+	}
+	if model.state.Settings != nil {
+		t.Fatalf("settings = %#v, want nil after cancel", model.state.Settings)
+	}
+	if model.manager.OpenMode != originalOpenMode {
+		t.Fatalf("open mode = %q, want unchanged %q", model.manager.OpenMode, originalOpenMode)
+	}
+}
+
+func TestCommandPaletteCanOpenSettings(t *testing.T) {
+	model := NewModel(Config{Entries: []sshconfig.HostEntry{{Alias: "prod"}}})
+
+	model, _ = model.update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(":")})
+	for _, r := range "settings" {
+		model, _ = model.update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{r}})
+	}
+	model, _ = model.update(tea.KeyMsg{Type: tea.KeyEnter})
+
+	if model.mode != modeSettings {
+		t.Fatalf("mode = %v, want settings", model.mode)
+	}
+}
+
 func renderedLineCount(value string) int {
 	value = strings.TrimRight(value, "\n")
 	if value == "" {

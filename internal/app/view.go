@@ -37,7 +37,7 @@ var (
 )
 
 const (
-	footerPrimary       = "Enter connect · : commands · / search · Space mark · g move · ? help"
+	footerPrimary       = "Enter connect · o settings · : commands · / search · Space mark · g move · ? help"
 	footerSecondary     = "H history · P preview · v expand · M monitor · r reload"
 	previewMinWidth     = 26
 	previewBaseWidth    = 50
@@ -76,6 +76,9 @@ func (m Model) View() string {
 	}
 	if m.mode == modeCommandPalette {
 		return m.fitToWindow(m.commandPaletteView())
+	}
+	if m.mode == modeSettings {
+		return m.settingsOverlayView()
 	}
 
 	return m.browseView()
@@ -328,6 +331,71 @@ func (m Model) commandPaletteView() string {
 	b.WriteString("\n")
 	b.WriteString(keyHints("Enter run", "↑/↓ choose", "type filter", "Ctrl+U clear", "Esc cancel"))
 	return b.String()
+}
+
+func (m Model) settingsView() string {
+	return m.settingsModalBody()
+}
+
+func (m Model) settingsOverlayView() string {
+	if m.width < 48 || m.height < 14 {
+		return m.fitToWindow(m.settingsView())
+	}
+	base := m.browseView()
+	modal := renderPanel("Settings", m.settingsModalLines(), min(58, m.width-8), 11, true)
+	return overlayCentered(base, modal, m.width, m.height)
+}
+
+func (m Model) settingsModalBody() string {
+	var b strings.Builder
+	b.WriteString(panelTitle("Settings"))
+	b.WriteString("\n\n")
+	for _, line := range m.settingsModalLines() {
+		b.WriteString(line)
+		b.WriteByte('\n')
+	}
+	b.WriteString("\n")
+	b.WriteString(keyHints("↑/↓ move", "←/→ change", "Space toggle", "s save", "Esc cancel"))
+	return b.String()
+}
+
+func (m Model) settingsModalLines() []string {
+	lines := make([]string, 0, len(settingFields())+2)
+	for i, field := range settingFields() {
+		value := m.settingDisplayValue(field.id)
+		row := "  " + padRight(field.label, 13) + "  " + value
+		if i == m.settings.field {
+			row = focusRow("› " + padRight(field.label, 13) + "  " + value)
+		}
+		lines = append(lines, row)
+	}
+	lines = append(lines, "")
+	lines = append(lines, keyHints("↑/↓ move", "←/→ change", "Space toggle", "s save", "Esc cancel"))
+	return lines
+}
+
+func (m Model) settingDisplayValue(id string) string {
+	switch id {
+	case "open-mode":
+		return accentStyle.Render(m.settings.openMode)
+	case "terminal":
+		return accentStyle.Render(m.settings.terminal)
+	case "preview":
+		return boolSettingLabel(m.settings.previewVisible)
+	case "raw-preview":
+		return boolSettingLabel(m.settings.showRawPreview)
+	case "monitor":
+		return boolSettingLabel(m.settings.monitorVisible)
+	default:
+		return ""
+	}
+}
+
+func boolSettingLabel(value bool) string {
+	if value {
+		return liveStyle.Render("on")
+	}
+	return mutedStyle.Render("off")
 }
 
 func (m Model) browseView() string {
@@ -1079,6 +1147,42 @@ func (m Model) fitToWindow(view string) string {
 	return strings.Join(truncateLines(lines, m.width), "\n")
 }
 
+func overlayCentered(base string, overlay []string, width, height int) string {
+	if width <= 0 || height <= 0 || len(overlay) == 0 {
+		return base
+	}
+	baseLines := strings.Split(base, "\n")
+	baseLines = fitLines(baseLines, height)
+	if len(baseLines) < height {
+		baseLines = append(baseLines, make([]string, height-len(baseLines))...)
+	}
+	baseLines = truncateLines(baseLines, width)
+
+	overlayHeight := min(len(overlay), height)
+	overlay = fitLines(overlay, overlayHeight)
+	overlayWidth := 0
+	for _, line := range overlay {
+		if w := lipgloss.Width(line); w > overlayWidth {
+			overlayWidth = w
+		}
+	}
+	if overlayWidth <= 0 {
+		return strings.Join(baseLines, "\n")
+	}
+	if overlayWidth > width {
+		overlayWidth = width
+		overlay = truncateLines(overlay, width)
+	}
+	top := (height - overlayHeight) / 2
+	left := (width - overlayWidth) / 2
+	for i := 0; i < overlayHeight; i++ {
+		row := fitColumnWidth(overlay[i], overlayWidth, strings.Repeat(" ", overlayWidth))
+		baseLines[top+i] = strings.Repeat(" ", left) + row
+		baseLines[top+i] = fitColumnWidth(baseLines[top+i], width, strings.Repeat(" ", width))
+	}
+	return strings.Join(baseLines, "\n")
+}
+
 const maxViewHeight = int(^uint(0) >> 1)
 
 func (m Model) helpView() string {
@@ -1088,6 +1192,7 @@ func (m Model) helpView() string {
 		"/      Enter search mode and edit the current filter.",
 		"Ctrl+U Clear the filter while search mode is active.",
 		":      Open the command palette (Ctrl+K also works).",
+		"o      Open settings for terminal mode and common UI preferences.",
 		"Enter  Open the selected host using the configured terminal mode.",
 		"Space  Mark or unmark a host for batch connect across filters/groups.",
 		"f      Toggle favorite for the selected host.",

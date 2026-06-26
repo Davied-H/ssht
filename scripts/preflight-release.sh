@@ -42,7 +42,7 @@ scan_sensitive_patterns() {
     cat "$tmp_file" >&2
   fi
 
-  if git grep -nE '/Users/[^[:space:]`"<>)]+' -- . >"$tmp_file" 2>/dev/null; then
+  if git grep -nE '/Users/[^[:space:]`"<>)]+' -- . | grep -v '^scripts/preflight-release.sh:' >"$tmp_file" 2>/dev/null; then
     if grep -v '/Users/example' "$tmp_file" >"$tmp_file.filtered"; then
       fail "possible personal absolute path found"
       cat "$tmp_file.filtered" >&2

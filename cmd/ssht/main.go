@@ -23,17 +23,18 @@ import (
 )
 
 type options struct {
-	ConfigPath     string
-	NoInclude      bool
-	PrintHosts     bool
-	Doctor         bool
-	ConnectHost    string
-	Debug          bool
-	Terminal       string
-	OpenMode       string
-	Monitor        bool
-	MonitorTTL     time.Duration
-	MonitorTimeout time.Duration
+	ConfigPath      string
+	NoInclude       bool
+	PrintHosts      bool
+	Doctor          bool
+	ConnectHost     string
+	Debug           bool
+	Terminal        string
+	OpenMode        string
+	Monitor         bool
+	MonitorExplicit bool
+	MonitorTTL      time.Duration
+	MonitorTimeout  time.Duration
 }
 
 func main() {
@@ -107,16 +108,17 @@ func main() {
 
 	enableTUIColorProfile()
 	model := app.NewModel(app.Config{
-		ConfigPath:     options.ConfigPath,
-		Entries:        entries,
-		Warnings:       warnings,
-		Manager:        manager,
-		Load:           load,
-		StatePath:      statePath,
-		State:          store,
-		Monitor:        monitorCache,
-		Probe:          probeFn,
-		MonitorVisible: options.Monitor,
+		ConfigPath:      options.ConfigPath,
+		Entries:         entries,
+		Warnings:        warnings,
+		Manager:         manager,
+		Load:            load,
+		StatePath:       statePath,
+		State:           store,
+		Monitor:         monitorCache,
+		Probe:           probeFn,
+		MonitorVisible:  options.Monitor,
+		MonitorExplicit: options.MonitorExplicit,
 	})
 	if _, err := tea.NewProgram(model, tea.WithAltScreen(), tea.WithMouseCellMotion()).Run(); err != nil {
 		exitErr(err)
@@ -156,13 +158,18 @@ func parseOptions(args []string) (options, error) {
 	flags.StringVar(&opts.ConnectHost, "connect", "", "open an SSH connection for the given Host alias without starting the TUI")
 	flags.BoolVar(&opts.Debug, "debug", false, "print parser warnings to stderr")
 	flags.StringVar(&opts.Terminal, "terminal", opts.Terminal, "terminal backend: auto, iterm, terminal, wezterm, kitty, alacritty, ghostty")
-	flags.StringVar(&opts.OpenMode, "open-mode", opts.OpenMode, "terminal open mode: auto, window, tab")
+	flags.StringVar(&opts.OpenMode, "open-mode", opts.OpenMode, "terminal open mode: auto, window, tab, split")
 	flags.BoolVar(&opts.Monitor, "monitor", false, "show the SSH monitoring panel on startup (toggle anytime with M)")
 	flags.DurationVar(&opts.MonitorTTL, "monitor-ttl", opts.MonitorTTL, "how long a monitor snapshot stays fresh")
 	flags.DurationVar(&opts.MonitorTimeout, "monitor-timeout", opts.MonitorTimeout, "hard timeout for one monitor SSH probe")
 	if err := flags.Parse(args); err != nil {
 		return options{}, err
 	}
+	flags.Visit(func(flag *flag.Flag) {
+		if flag.Name == "monitor" {
+			opts.MonitorExplicit = true
+		}
+	})
 	opts.Terminal = strings.ToLower(strings.TrimSpace(opts.Terminal))
 	if opts.Terminal == "" {
 		opts.Terminal = "auto"
@@ -175,7 +182,7 @@ func parseOptions(args []string) (options, error) {
 		opts.OpenMode = string(terminal.OpenModeAuto)
 	}
 	if !terminal.ValidOpenMode(terminal.OpenMode(opts.OpenMode)) {
-		return options{}, errors.New("unsupported open mode " + opts.OpenMode + "; supported modes: auto, window, tab")
+		return options{}, errors.New("unsupported open mode " + opts.OpenMode + "; supported modes: auto, window, tab, split")
 	}
 	return opts, nil
 }

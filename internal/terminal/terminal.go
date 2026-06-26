@@ -116,7 +116,7 @@ func (m *Manager) selectBackend() (*Backend, error) {
 	}
 	mode := m.openMode()
 	if !ValidOpenMode(mode) {
-		return nil, fmt.Errorf("unsupported open mode %q; supported modes: auto, window, tab", mode)
+		return nil, fmt.Errorf("unsupported open mode %q; supported modes: auto, window, tab, split", mode)
 	}
 	backends := defaultBackends()
 	if preference := normalizePreference(m.Preference); preference != "" && preference != "auto" {
@@ -133,6 +133,7 @@ func (m *Manager) selectBackend() (*Backend, error) {
 		m.selected = &backend
 		return &backend, nil
 	}
+	backends = prioritizeCurrentBackend(backends, currentTerminalBackendID(m.env()))
 	var tried []string
 	for _, backend := range backends {
 		if !backend.supports(mode) {
@@ -153,12 +154,26 @@ func defaultBackends() []Backend {
 			ID:       "iterm",
 			Name:     "iTerm2",
 			Check:    appCheck("iTerm"),
-			Supports: supportsWindowAndTab,
+			Supports: supportsITermModes,
 			Connect: func(runner Runner, mode OpenMode, target Target, env EnvLookup) (OpenMode, error) {
 				command := sshCommand(target)
 				hasWindow := false
-				if mode == OpenModeAuto || mode == OpenModeTab {
+				if mode == OpenModeAuto || mode == OpenModeTab || mode == OpenModeSplit {
 					hasWindow = hasAppWindow(runner, "iTerm")
+				}
+				if mode == OpenModeSplit {
+					if !isITermSession(env) || !hasWindow {
+						return "", fmt.Errorf("iTerm2 split mode requires an active iTerm2 session")
+					}
+					return OpenModeSplit, runner.Run("osascript",
+						"-e", `tell application "iTerm"`,
+						"-e", "activate",
+						"-e", `tell current session of current window`,
+						"-e", `set newSession to (split vertically with default profile)`,
+						"-e", `tell newSession to write text `+appleScriptString(command),
+						"-e", "end tell",
+						"-e", "end tell",
+					)
 				}
 				if mode == OpenModeAuto && isITermSession(env) && hasWindow {
 					return OpenModeSplit, runner.Run("osascript",
@@ -228,6 +243,57 @@ func defaultBackends() []Backend {
 	}
 }
 
+func prioritizeCurrentBackend(backends []Backend, id string) []Backend {
+	if id == "" {
+		return backends
+	}
+	idx := -1
+	for i, backend := range backends {
+		if backend.ID == id {
+			idx = i
+			break
+		}
+	}
+	if idx <= 0 {
+		return backends
+	}
+	out := make([]Backend, 0, len(backends))
+	out = append(out, backends[idx])
+	out = append(out, backends[:idx]...)
+	out = append(out, backends[idx+1:]...)
+	return out
+}
+
+func currentTerminalBackendID(env EnvLookup) string {
+	if env == nil {
+		return ""
+	}
+	termProgram := strings.ToLower(strings.TrimSpace(env("TERM_PROGRAM")))
+	switch termProgram {
+	case "iterm.app":
+		return "iterm"
+	case "apple_terminal":
+		return "terminal"
+	case "wezterm":
+		return "wezterm"
+	case "ghostty":
+		return "ghostty"
+	}
+	if env("KITTY_WINDOW_ID") != "" {
+		return "kitty"
+	}
+	if env("ALACRITTY_WINDOW_ID") != "" {
+		return "alacritty"
+	}
+	if env("WEZTERM_PANE") != "" {
+		return "wezterm"
+	}
+	if env("GHOSTTY_RESOURCES_DIR") != "" || env("GHOSTTY_BIN_DIR") != "" {
+		return "ghostty"
+	}
+	return ""
+}
+
 func appCheck(name string) func(Runner) error {
 	return func(runner Runner) error {
 		_, err := runner.Output("osascript", "-e", `id of application "`+name+`"`)
@@ -237,6 +303,10 @@ func appCheck(name string) func(Runner) error {
 
 func supportsWindowAndTab(mode OpenMode) bool {
 	return mode == OpenModeAuto || mode == OpenModeWindow || mode == OpenModeTab
+}
+
+func supportsITermModes(mode OpenMode) bool {
+	return supportsWindowAndTab(mode) || mode == OpenModeSplit
 }
 
 func windowOnlyCLIBackend(id, name, command string, args ...string) Backend {
@@ -317,7 +387,7 @@ func normalizePreference(preference string) string {
 }
 
 func ValidOpenMode(mode OpenMode) bool {
-	return mode == OpenModeAuto || mode == OpenModeWindow || mode == OpenModeTab
+	return mode == OpenModeAuto || mode == OpenModeWindow || mode == OpenModeTab || mode == OpenModeSplit
 }
 
 func supportedBackends(backends []Backend) string {

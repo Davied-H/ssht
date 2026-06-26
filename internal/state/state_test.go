@@ -100,6 +100,32 @@ func TestSaveAndLoadEmptyGroupsRoundTrip(t *testing.T) {
 	}
 }
 
+func TestSaveAndLoadSettingsRoundTrip(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "state.json")
+	store := NewStore()
+	store.Settings = &Settings{
+		OpenMode:       "split",
+		Terminal:       "iterm",
+		PreviewVisible: false,
+		ShowRawPreview: true,
+		MonitorVisible: true,
+	}
+
+	if err := Save(path, store); err != nil {
+		t.Fatalf("Save returned error: %v", err)
+	}
+	loaded, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load returned error: %v", err)
+	}
+	if loaded.Settings == nil {
+		t.Fatal("Settings = nil, want saved settings")
+	}
+	if *loaded.Settings != *store.Settings {
+		t.Fatalf("Settings = %#v, want %#v", loaded.Settings, store.Settings)
+	}
+}
+
 func TestLoadOldFormatYieldsNilSlices(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "state.json")
 	if err := os.WriteFile(path, []byte(`{"hosts":{"prod-api":{"favorite":true}}}`), 0o600); err != nil {
@@ -117,6 +143,9 @@ func TestLoadOldFormatYieldsNilSlices(t *testing.T) {
 	}
 	if !loaded.Hosts["prod-api"].Favorite {
 		t.Fatalf("Hosts[prod-api].Favorite = false, want true")
+	}
+	if loaded.Settings != nil {
+		t.Fatalf("Settings = %#v, want nil for old state", loaded.Settings)
 	}
 }
 

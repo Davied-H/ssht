@@ -10,12 +10,50 @@ func TestAutoDetectSelectsFirstAvailableBackend(t *testing.T) {
 	runner := &recordingRunner{failOutputs: map[string]bool{
 		`osascript|-e|id of application "iTerm"`: true,
 	}}
-	manager := Manager{Runner: runner}
+	manager := Manager{Runner: runner, Env: mapEnv()}
 
 	if err := manager.CheckAvailable(); err != nil {
 		t.Fatalf("CheckAvailable returned error: %v", err)
 	}
 	if got, want := manager.BackendName(), "Terminal.app"; got != want {
+		t.Fatalf("backend = %q, want %q", got, want)
+	}
+}
+
+func TestAutoDetectPrefersCurrentTerminalApp(t *testing.T) {
+	runner := &recordingRunner{}
+	manager := Manager{Runner: runner, Env: mapEnv("TERM_PROGRAM", "Apple_Terminal")}
+
+	if err := manager.CheckAvailable(); err != nil {
+		t.Fatalf("CheckAvailable returned error: %v", err)
+	}
+
+	want := [][]string{
+		{"output", "osascript", "-e", `id of application "Terminal"`},
+	}
+	if !reflect.DeepEqual(runner.calls, want) {
+		t.Fatalf("calls = %#v, want %#v", runner.calls, want)
+	}
+	if got, want := manager.BackendName(), "Terminal.app"; got != want {
+		t.Fatalf("backend = %q, want %q", got, want)
+	}
+}
+
+func TestAutoDetectPrefersCurrentWezTerm(t *testing.T) {
+	runner := &recordingRunner{}
+	manager := Manager{Runner: runner, Env: mapEnv("TERM_PROGRAM", "WezTerm")}
+
+	if err := manager.CheckAvailable(); err != nil {
+		t.Fatalf("CheckAvailable returned error: %v", err)
+	}
+
+	want := [][]string{
+		{"output", "which", "wezterm"},
+	}
+	if !reflect.DeepEqual(runner.calls, want) {
+		t.Fatalf("calls = %#v, want %#v", runner.calls, want)
+	}
+	if got, want := manager.BackendName(), "WezTerm"; got != want {
 		t.Fatalf("backend = %q, want %q", got, want)
 	}
 }
@@ -166,6 +204,45 @@ func TestOpenSSHUsesITermSplitForAutoModeInsideITerm(t *testing.T) {
 	}
 }
 
+func TestValidOpenModeAcceptsSplit(t *testing.T) {
+	if !ValidOpenMode(OpenModeSplit) {
+		t.Fatal("split should be a valid open mode")
+	}
+}
+
+func TestOpenSSHUsesExplicitITermSplitInsideITerm(t *testing.T) {
+	runner := &recordingRunner{}
+	manager := Manager{
+		Runner:     runner,
+		Preference: "iterm",
+		OpenMode:   OpenModeSplit,
+		Env:        mapEnv("ITERM_SESSION_ID", "w0t0p0"),
+	}
+
+	if err := manager.Connect("prod-api"); err != nil {
+		t.Fatalf("Connect returned error: %v", err)
+	}
+
+	want := [][]string{
+		{"output", "osascript", "-e", `id of application "iTerm"`},
+		{"output", "osascript", "-e", `tell application "iTerm" to count windows`},
+		{"run", "osascript",
+			"-e", `tell application "iTerm"`,
+			"-e", "activate",
+			"-e", `tell current session of current window`,
+			"-e", `set newSession to (split vertically with default profile)`,
+			"-e", `tell newSession to write text "env -u LC_ALL ssh 'prod-api'"`,
+			"-e", "end tell",
+			"-e", "end tell"},
+	}
+	if !reflect.DeepEqual(runner.calls, want) {
+		t.Fatalf("calls = %#v, want %#v", runner.calls, want)
+	}
+	if got, want := manager.OpenModeName(), "split"; got != want {
+		t.Fatalf("open mode name = %q, want %q", got, want)
+	}
+}
+
 func TestOpenSSHUsesITermTabForAutoModeOutsideITerm(t *testing.T) {
 	runner := &recordingRunner{}
 	manager := Manager{
@@ -279,6 +356,19 @@ func TestOpenSSHUsesTerminalAppWindow(t *testing.T) {
 	}
 	if !reflect.DeepEqual(runner.calls, want) {
 		t.Fatalf("calls = %#v, want %#v", runner.calls, want)
+	}
+}
+
+func TestTerminalAppSplitReturnsUnsupportedError(t *testing.T) {
+	runner := &recordingRunner{}
+	manager := Manager{Runner: runner, Preference: "terminal", OpenMode: OpenModeSplit}
+
+	err := manager.Connect("prod-api")
+	if err == nil {
+		t.Fatal("expected unsupported split error")
+	}
+	if !strings.Contains(err.Error(), "Terminal.app does not support split mode") {
+		t.Fatalf("error = %q, want unsupported split mode", err)
 	}
 }
 

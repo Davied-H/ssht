@@ -20,6 +20,15 @@ type Store struct {
 	Hosts       map[string]HostState `json:"hosts"`
 	GroupOrder  []string             `json:"groupOrder,omitempty"`
 	EmptyGroups []string             `json:"emptyGroups,omitempty"`
+	Settings    *Settings            `json:"settings,omitempty"`
+}
+
+type Settings struct {
+	OpenMode       string `json:"openMode,omitempty"`
+	Terminal       string `json:"terminal,omitempty"`
+	PreviewVisible bool   `json:"previewVisible"`
+	ShowRawPreview bool   `json:"showRawPreview,omitempty"`
+	MonitorVisible bool   `json:"monitorVisible,omitempty"`
 }
 
 func NewStore() Store {

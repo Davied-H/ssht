@@ -284,6 +284,19 @@ func TestHelpViewDocumentsSearchClearShortcut(t *testing.T) {
 	}
 }
 
+func TestSettingsRendersAsOverlayOnBrowseView(t *testing.T) {
+	model := NewModel(Config{Entries: []sshconfig.HostEntry{{Alias: "prod-api", Group: "prod"}}})
+	model, _ = model.update(tea.WindowSizeMsg{Width: 120, Height: 24})
+	model, _ = model.update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("o")})
+
+	view := stripANSI(model.View())
+	for _, want := range []string{"Settings", "Open mode", "Terminal", "ssht", "prod-api"} {
+		if !strings.Contains(view, want) {
+			t.Fatalf("settings overlay missing %q:\n%s", want, view)
+		}
+	}
+}
+
 func TestFooterHintsKeepPlainTextStableWithStyledKeys(t *testing.T) {
 	model := NewModel(Config{Entries: []sshconfig.HostEntry{{Alias: "prod-api"}}})
 	model, _ = model.update(tea.WindowSizeMsg{Width: 120, Height: 18})

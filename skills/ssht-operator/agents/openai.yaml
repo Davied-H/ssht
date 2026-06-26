@@ -1,0 +1,4 @@
+interface:
+  display_name: "ssht Operator"
+  short_description: "Guide agents to operate ssht safely"
+  default_prompt: "Use $ssht-operator to help me install, diagnose, configure, or operate ssht safely."

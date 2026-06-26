@@ -16,17 +16,18 @@ import (
 )
 
 type Config struct {
-	ConfigPath     string
-	Entries        []sshconfig.HostEntry
-	Warnings       []sshconfig.Warning
-	Manager        terminal.Manager
-	Load           func() ([]sshconfig.HostEntry, []sshconfig.Warning, error)
-	StatePath      string
-	State          state.Store
-	Now            func() time.Time
-	Monitor        *monitor.Cache
-	Probe          monitor.ProbeFunc
-	MonitorVisible bool
+	ConfigPath      string
+	Entries         []sshconfig.HostEntry
+	Warnings        []sshconfig.Warning
+	Manager         terminal.Manager
+	Load            func() ([]sshconfig.HostEntry, []sshconfig.Warning, error)
+	StatePath       string
+	State           state.Store
+	Now             func() time.Time
+	Monitor         *monitor.Cache
+	Probe           monitor.ProbeFunc
+	MonitorVisible  bool
+	MonitorExplicit bool
 }
 
 type Model struct {
@@ -55,6 +56,7 @@ type Model struct {
 	groupInline  groupInlineState
 	groupPicker  groupPickerState
 	command      commandPaletteState
+	settings     settingsState
 
 	showRawPreview bool
 	previewVisible bool
@@ -75,6 +77,7 @@ const (
 	modeWarnings
 	modeHistory
 	modeCommandPalette
+	modeSettings
 )
 
 type focusKind int
@@ -133,6 +136,15 @@ type groupPickerState struct {
 type commandPaletteState struct {
 	buffer string
 	cursor int
+}
+
+type settingsState struct {
+	field          int
+	terminal       string
+	openMode       string
+	previewVisible bool
+	showRawPreview bool
+	monitorVisible bool
 }
 
 type pendingOperation struct {
@@ -221,6 +233,9 @@ func NewModel(cfg Config) Model {
 		monitor:        cfg.Monitor,
 		probe:          cfg.Probe,
 		monitorVisible: cfg.MonitorVisible,
+	}
+	if cfg.State.Settings != nil {
+		m.applySavedSettings(*cfg.State.Settings, cfg.MonitorExplicit)
 	}
 	m.applyFilter()
 	return m
@@ -421,6 +436,8 @@ func (m Model) handleKey(key tea.KeyMsg) (Model, tea.Cmd) {
 			return m, tea.Quit
 		case ":":
 			return m.startCommandPalette(), nil
+		case "o":
+			return m.startSettings(), nil
 		case "?":
 			m.showHelp = !m.showHelp
 		case "H":
@@ -689,6 +706,9 @@ func (m Model) handleSidebarKey(key tea.KeyMsg) (Model, tea.Cmd) {
 		case ":":
 			m.focus = focusList
 			return m.startCommandPalette(), nil
+		case "o":
+			m.focus = focusList
+			return m.startSettings(), nil
 		case "?":
 			m.showHelp = !m.showHelp
 			return m, nil
@@ -909,6 +929,9 @@ func (m Model) handleModeKey(key tea.KeyMsg) (Model, tea.Cmd) {
 	if m.mode == modeCommandPalette {
 		return m.handleCommandPaletteKey(key)
 	}
+	if m.mode == modeSettings {
+		return m.handleSettingsKey(key)
+	}
 	switch key.Type {
 	case tea.KeyCtrlC:
 		return m, tea.Quit
@@ -1077,6 +1100,193 @@ func (m Model) handleCommandPaletteKey(key tea.KeyMsg) (Model, tea.Cmd) {
 		return m, nil
 	}
 	return m, nil
+}
+
+func (m Model) handleSettingsKey(key tea.KeyMsg) (Model, tea.Cmd) {
+	switch key.Type {
+	case tea.KeyCtrlC:
+		return m, tea.Quit
+	case tea.KeyEsc:
+		m.mode = modeBrowse
+		m.settings = settingsState{}
+		m.status = ""
+		return m, nil
+	case tea.KeyEnter:
+		return m.commitSettings()
+	case tea.KeyUp:
+		m.moveSettingsField(-1)
+		return m, nil
+	case tea.KeyDown:
+		m.moveSettingsField(1)
+		return m, nil
+	case tea.KeyLeft:
+		m.cycleSetting(-1)
+		return m, nil
+	case tea.KeyRight, tea.KeySpace:
+		m.cycleSetting(1)
+		return m, nil
+	case tea.KeyRunes:
+		switch key.String() {
+		case "s":
+			return m.commitSettings()
+		case "j":
+			m.moveSettingsField(1)
+			return m, nil
+		case "k":
+			m.moveSettingsField(-1)
+			return m, nil
+		case "h":
+			m.cycleSetting(-1)
+			return m, nil
+		case "l":
+			m.cycleSetting(1)
+			return m, nil
+		}
+	}
+	return m, nil
+}
+
+func (m Model) startSettings() Model {
+	m.mode = modeSettings
+	m.status = ""
+	m.settings = settingsStateFromModel(m)
+	return m
+}
+
+func settingsStateFromModel(m Model) settingsState {
+	terminalPreference := strings.TrimSpace(m.manager.Preference)
+	if terminalPreference == "" {
+		terminalPreference = "auto"
+	}
+	openMode := strings.TrimSpace(string(m.manager.OpenMode))
+	if openMode == "" {
+		openMode = string(terminal.OpenModeAuto)
+	}
+	return settingsState{
+		terminal:       terminalPreference,
+		openMode:       openMode,
+		previewVisible: m.previewVisible,
+		showRawPreview: m.showRawPreview,
+		monitorVisible: m.monitorVisible,
+	}
+}
+
+func (m *Model) moveSettingsField(delta int) {
+	m.settings.field += delta
+	if m.settings.field < 0 {
+		m.settings.field = len(settingFields()) - 1
+	}
+	if m.settings.field >= len(settingFields()) {
+		m.settings.field = 0
+	}
+}
+
+func (m *Model) cycleSetting(delta int) {
+	switch settingFields()[m.settings.field].id {
+	case "open-mode":
+		m.settings.openMode = cycleStringOption(m.settings.openMode, settingOpenModes(), delta)
+	case "terminal":
+		m.settings.terminal = cycleStringOption(m.settings.terminal, settingTerminals(), delta)
+	case "preview":
+		m.settings.previewVisible = !m.settings.previewVisible
+	case "raw-preview":
+		m.settings.showRawPreview = !m.settings.showRawPreview
+	case "monitor":
+		m.settings.monitorVisible = !m.settings.monitorVisible
+	}
+}
+
+func (m Model) commitSettings() (Model, tea.Cmd) {
+	m.state.Settings = &state.Settings{
+		OpenMode:       m.settings.openMode,
+		Terminal:       m.settings.terminal,
+		PreviewVisible: m.settings.previewVisible,
+		ShowRawPreview: m.settings.showRawPreview,
+		MonitorVisible: m.settings.monitorVisible,
+	}
+	m.applySettingsState(m.settings)
+	m.mode = modeBrowse
+	m.settings = settingsState{}
+	m.status = "settings saved"
+	return m, m.saveStateCmd()
+}
+
+func (m *Model) applySavedSettings(settings state.Settings, monitorExplicit bool) {
+	next := settingsStateFromModel(*m)
+	if validSettingsValue(settings.OpenMode, settingOpenModes()) {
+		next.openMode = settings.OpenMode
+	}
+	if validSettingsValue(settings.Terminal, settingTerminals()) {
+		next.terminal = settings.Terminal
+	}
+	next.previewVisible = settings.PreviewVisible
+	next.showRawPreview = settings.ShowRawPreview
+	if !monitorExplicit {
+		next.monitorVisible = settings.MonitorVisible
+	}
+	m.applySettingsState(next)
+}
+
+func (m *Model) applySettingsState(settings settingsState) {
+	m.manager = terminal.Manager{
+		Runner:     m.manager.Runner,
+		Preference: settings.terminal,
+		OpenMode:   terminal.OpenMode(settings.openMode),
+		Env:        m.manager.Env,
+	}
+	m.previewVisible = settings.previewVisible
+	m.showRawPreview = settings.showRawPreview
+	m.monitorVisible = settings.monitorVisible
+}
+
+func validSettingsValue(value string, options []string) bool {
+	for _, option := range options {
+		if value == option {
+			return true
+		}
+	}
+	return false
+}
+
+func cycleStringOption(current string, options []string, delta int) string {
+	if len(options) == 0 {
+		return current
+	}
+	idx := 0
+	for i, option := range options {
+		if option == current {
+			idx = i
+			break
+		}
+	}
+	idx = (idx + delta) % len(options)
+	if idx < 0 {
+		idx += len(options)
+	}
+	return options[idx]
+}
+
+type settingField struct {
+	id    string
+	label string
+}
+
+func settingFields() []settingField {
+	return []settingField{
+		{id: "open-mode", label: "Open mode"},
+		{id: "terminal", label: "Terminal"},
+		{id: "preview", label: "Preview"},
+		{id: "raw-preview", label: "Raw preview"},
+		{id: "monitor", label: "Monitor"},
+	}
+}
+
+func settingOpenModes() []string {
+	return []string{"auto", "split", "tab", "window"}
+}
+
+func settingTerminals() []string {
+	return []string{"auto", "iterm", "terminal", "wezterm", "kitty", "alacritty", "ghostty"}
 }
 
 func (m Model) handleGroupPickerKey(key tea.KeyMsg) (Model, tea.Cmd) {
@@ -1573,6 +1783,7 @@ func (m Model) commandEntries() []commandEntry {
 		{ID: "source", Title: "Show source", Description: "Show source config path and line"},
 		{ID: "warnings", Title: "Show warnings", Description: "Open parser warnings"},
 		{ID: "history", Title: "Show history", Description: "Recent and frequent connections"},
+		{ID: "settings", Title: "Settings", Description: "Open terminal and UI preferences"},
 		{ID: "reload", Title: "Reload config", Description: "Reload SSH config files"},
 		{ID: "favorite", Title: "Toggle favorite", Description: "Favorite or unfavorite selected host"},
 	}
@@ -1692,6 +1903,8 @@ func (m Model) runCommandPaletteSelection() (Model, tea.Cmd) {
 		m.mode = modeHistory
 		m.status = ""
 		return m, nil
+	case "settings":
+		return m.startSettings(), nil
 	case "reload":
 		return m, m.reloadCmd()
 	case "favorite":

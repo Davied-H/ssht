@@ -36,6 +36,7 @@ ssht doctor
 ssht --print-hosts
 ssht --terminal terminal
 ssht --open-mode tab
+ssht --open-mode split
 ssht --monitor
 ssht --connect prod-api-01
 ```
@@ -45,8 +46,8 @@ ssht --connect prod-api-01
 - `--connect <alias>`：跳过 TUI，直接打开指定 Host。
 - `--no-include`：禁用 `Include` 递归解析。
 - `--debug`：把解析 warning 输出到 stderr。
-- `--terminal`：选择终端后端，支持 `auto`、`iterm`、`terminal`、`wezterm`、`kitty`、`alacritty`、`ghostty`。
-- `--open-mode`：选择打开方式，支持 `auto`、`window`、`tab`。
+- `--terminal`：选择终端后端，支持 `auto`、`iterm`、`terminal`、`wezterm`、`kitty`、`alacritty`、`ghostty`。`auto` 会优先使用当前运行 `ssht` 的终端。
+- `--open-mode`：选择打开方式，支持 `auto`、`window`、`tab`、`split`。
 - `--monitor`：启动时显示 SSH 监控面板。
 
 也可以通过环境变量设置默认行为：
@@ -66,6 +67,7 @@ SSHT_OPEN_MODE=tab ssht
 - `fav:`：只显示收藏主机
 - `recent:`：只显示最近连接主机
 - `:` / `Ctrl+K`：打开命令面板
+- `o`：打开设置弹窗，调整终端打开方式和界面偏好
 - `[` / `]` 或 Left / Right：切换分组
 - `PgUp` / `PgDn` / `Home` / `End`：快速移动光标
 - `Tab`：在主机列表与分组侧栏之间切换焦点
@@ -158,7 +160,9 @@ Host password-host
 
 ## 本地状态
 
-`ssht` 会保存收藏、最近连接时间和连接次数。不会保存 HostName、User、IdentityFile、密码、私钥或其他 SSH 凭据。
+`ssht` 会保存收藏、最近连接时间、连接次数、分组顺序、空 group，以及 TUI 设置弹窗里的终端打开方式和界面偏好。不会保存 HostName、User、IdentityFile、密码、私钥或其他 SSH 凭据。
+
+TUI 设置只影响交互界面启动后的行为；`ssht --connect` 仍只受命令行参数和环境变量控制。
 
 状态文件路径：
 
@@ -168,7 +172,7 @@ Host password-host
 
 ## 终端行为
 
-默认按以下顺序自动选择第一个可用终端：
+`--terminal auto` 会先尝试当前运行 `ssht` 的终端；无法识别或不可用时，再按以下顺序自动选择第一个可用终端：
 
 1. iTerm2
 2. Terminal.app
@@ -177,7 +181,7 @@ Host password-host
 5. Alacritty
 6. Ghostty
 
-`--open-mode auto` 在 iTerm2 会话内会使用右侧分屏；不在 iTerm2 会话内时按新 tab 行为打开。显式指定 `tab` 或 `window` 后不会自动切换语义。
+`--open-mode auto` 在 iTerm2 会话内会使用右侧分屏；不在 iTerm2 会话内时按新 tab 行为打开。显式指定 `split` 时只支持 iTerm2 当前会话分屏；不支持 split 的终端会报错。显式指定 `tab` 或 `window` 后不会自动切换语义。
 
 如果 `Host` 前紧挨着 `# sshpass 密码: ...` 注释，则连接命令会变成：
 
@@ -209,6 +213,7 @@ npm run dev
 - `AGENTS.md`：Codex 项目说明
 - `CLAUDE.md`：Claude Code 项目说明
 - `skills/ssht-config-auditor`
+- `skills/ssht-operator`
 - `skills/ssht-release-packager`
 - `skills/ssht-raycast-helper`
 
