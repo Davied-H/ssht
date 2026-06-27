@@ -59,6 +59,8 @@ SSHT_OPEN_MODE=tab ssht
 
 ## 快捷键
 
+- `1`-`9`：直接连接列表中标号的常用/当前主机；空筛选时优先显示收藏、最近连接和高频连接主机
+- 直接输入任意字符：开始搜索，并把该字符作为筛选内容
 - `/`：进入搜索并编辑当前筛选
 - `Ctrl+U`：在搜索中清空筛选
 - `tag:<name>`：按标签筛选
@@ -66,36 +68,44 @@ SSHT_OPEN_MODE=tab ssht
 - `-<term>`：否定筛选，例如 `prod -db`
 - `fav:`：只显示收藏主机
 - `recent:`：只显示最近连接主机
-- `:` / `Ctrl+K`：打开命令面板
-- `o`：打开设置弹窗，调整终端打开方式和界面偏好
-- `[` / `]` 或 Left / Right：切换分组
+- `Ctrl+K`：打开命令面板
+- `Ctrl+O`：打开设置弹窗，调整终端打开方式和界面偏好
+- `Left` / `Right`：切换分组
 - `PgUp` / `PgDn` / `Home` / `End`：快速移动光标
 - `Tab`：在主机列表与分组侧栏之间切换焦点
 - `Enter`：打开选中主机
 - `Space`：标记或取消标记主机
-- `f`：收藏或取消收藏
-- `e`：编辑主机
-- `A`：新增主机
-- `d`：删除主机
+- `Ctrl+F`：收藏或取消收藏
+- `Ctrl+E`：编辑主机
+- `Ctrl+A`：新增主机
+- `Ctrl+D`：删除主机
 - `Ctrl+S`：在新增/编辑表单中进入保存确认
 - `s`：确认待执行的写入操作
-- `g`：移动当前主机或已标记主机到分组
-- `r`：重新加载 SSH config
-- `R`：刷新当前主机 monitor 快照
-- `H`：查看本地连接历史
-- `W`：查看 SSH config 解析 warning
-- `?`：帮助
-- `q` / `Esc`：退出
+- `Ctrl+G`：移动当前主机或已标记主机到分组
+- `Ctrl+R`：重新加载 SSH config
+- `Ctrl+T`：刷新当前主机 monitor 快照
+- `Ctrl+Y`：查看本地连接历史
+- `Ctrl+W`：查看 SSH config 解析 warning
+- `Ctrl+P`：显示或隐藏预览面板
+- `Ctrl+V`：切换扩展预览
+- `Ctrl+N`：显示或隐藏 monitor 面板
+- `Ctrl+L`：帮助
+- `Esc` / `Ctrl+C`：退出
+
+设置弹窗里可以调整显示密度：
+
+- `comfortable`：默认模式，列表保留环境和风险标签，便于运维扫视。
+- `compact`：紧凑模式，减少辅助信息，适合较窄终端。
 
 侧栏聚焦后：
 
-- `j` / `k`：移动分组选择
-- `a`：新建空 group
-- `r`：重命名当前 group
-- `m`：合并 group
-- `d`：删除当前 group
-- `M`：把已标记主机批量移动到当前 group
-- `J` / `K`：调整 group 顺序
+- `Up` / `Down`：移动分组选择
+- `Ctrl+A`：新建空 group
+- `Ctrl+R`：重命名当前 group
+- `Ctrl+B`：合并 group
+- `Ctrl+D`：删除当前 group
+- `Ctrl+G`：把已标记主机批量移动到当前 group
+- `Ctrl+Up` / `Ctrl+Down`：调整 group 顺序
 
 ## SSH Config 支持范围
 

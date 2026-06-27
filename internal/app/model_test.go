@@ -91,7 +91,7 @@ func TestCommandPaletteOpensHistory(t *testing.T) {
 	model := NewModel(Config{Entries: []sshconfig.HostEntry{{Alias: "prod-api"}}})
 
 	var cmd tea.Cmd
-	model, cmd = model.update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(":")})
+	model, cmd = model.update(tea.KeyMsg{Type: tea.KeyCtrlK})
 	if cmd != nil || model.mode != modeCommandPalette {
 		t.Fatalf("mode=%v cmd=%v, want command palette", model.mode, cmd)
 	}
@@ -145,18 +145,75 @@ func TestSearchModeKeepsActionKeysAsFilterText(t *testing.T) {
 	}
 }
 
-func TestPlainTypingDoesNotEnterSearchMode(t *testing.T) {
+func TestPlainTypingStartsSearchMode(t *testing.T) {
 	model := NewModel(Config{Entries: []sshconfig.HostEntry{
 		{Alias: "prod-api"},
 		{Alias: "dev-db"},
 	}})
 
 	model, _ = model.update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("prod")})
-	if model.Filter() != "" {
-		t.Fatalf("plain typing should not filter, got %q", model.Filter())
+	if !model.searchActive {
+		t.Fatal("plain typing should activate search")
 	}
-	if len(model.FilteredEntries()) != 2 {
-		t.Fatalf("plain typing should keep all entries, got %#v", model.FilteredEntries())
+	if model.Filter() != "prod" {
+		t.Fatalf("filter = %q, want prod", model.Filter())
+	}
+	if len(model.FilteredEntries()) != 1 || model.FilteredEntries()[0].Alias != "prod-api" {
+		t.Fatalf("plain typing should filter entries, got %#v", model.FilteredEntries())
+	}
+}
+
+func TestDigitKeyQuickConnectsTopHostInsteadOfSearching(t *testing.T) {
+	runner := &countingRunner{}
+	store := state.NewStore()
+	store.Hosts["prod-api"] = state.HostState{Favorite: true, ConnectCount: 4, LastConnectedAt: "2026-06-26T10:00:00Z"}
+	model := NewModel(Config{
+		Entries: []sshconfig.HostEntry{
+			{Alias: "dev-db"},
+			{Alias: "prod-api"},
+		},
+		State: store,
+		Manager: terminal.Manager{
+			Runner:     runner,
+			Preference: "terminal",
+			OpenMode:   terminal.OpenModeWindow,
+		},
+	})
+
+	updated, cmd := model.update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("1")})
+	model = updated
+	if cmd == nil {
+		t.Fatal("expected quick connect command")
+	}
+	if model.searchActive || model.Filter() != "" {
+		t.Fatalf("digit quick connect should not start search, searchActive=%v filter=%q", model.searchActive, model.Filter())
+	}
+	msg := cmd()
+	model, _ = model.update(msg)
+	if runner.runCalls != 1 {
+		t.Fatalf("run calls = %d, want 1", runner.runCalls)
+	}
+	if got := model.state.Hosts["prod-api"].ConnectCount; got != 5 {
+		t.Fatalf("prod-api connect count = %d, want 5", got)
+	}
+}
+
+func TestQuickConnectEntriesPreferFavoritesAndRecentHosts(t *testing.T) {
+	store := state.NewStore()
+	store.Hosts["prod-api"] = state.HostState{Favorite: true}
+	store.Hosts["stage-api"] = state.HostState{LastConnectedAt: "2026-06-26T10:00:00Z"}
+	model := NewModel(Config{
+		Entries: []sshconfig.HostEntry{
+			{Alias: "dev-db"},
+			{Alias: "stage-api"},
+			{Alias: "prod-api"},
+		},
+		State: store,
+	})
+
+	hosts := model.quickConnectEntries()
+	if got := aliases(hosts[:2]); strings.Join(got, ",") != "prod-api,stage-api" {
+		t.Fatalf("quick hosts = %v, want favorite then recent", got)
 	}
 }
 
@@ -225,7 +282,7 @@ func TestModelFormAllowsSAsTextAndCtrlSReviewsSave(t *testing.T) {
 	model := NewModel(Config{})
 
 	var cmd tea.Cmd
-	model, cmd = model.update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("A")})
+	model, cmd = model.update(tea.KeyMsg{Type: tea.KeyCtrlA})
 	if cmd != nil || model.mode != modeForm {
 		t.Fatalf("expected add form, mode=%v cmd=%v", model.mode, cmd)
 	}
@@ -368,7 +425,7 @@ func TestModelTogglesFavoriteAndSavesState(t *testing.T) {
 	})
 
 	var cmd tea.Cmd
-	model, cmd = model.update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("f")})
+	model, cmd = model.update(tea.KeyMsg{Type: tea.KeyCtrlF})
 	if cmd == nil {
 		t.Fatal("expected state save command")
 	}
@@ -684,7 +741,7 @@ func TestTabSwitchesFocusToSidebar(t *testing.T) {
 	}
 }
 
-func TestSidebarFocusJKMovesGroupCursor(t *testing.T) {
+func TestSidebarFocusArrowsMoveGroupCursor(t *testing.T) {
 	model := NewModel(Config{
 		Entries: []sshconfig.HostEntry{
 			{Alias: "a", Group: "alpha"},
@@ -695,13 +752,13 @@ func TestSidebarFocusJKMovesGroupCursor(t *testing.T) {
 	if got := model.selectedGroup(); got != "all" {
 		t.Fatalf("initial selection = %q, want all", got)
 	}
-	model, _ = model.update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("j")})
+	model, _ = model.update(tea.KeyMsg{Type: tea.KeyDown})
 	if got := model.selectedGroup(); got != "alpha" {
-		t.Fatalf("after j selection = %q, want alpha", got)
+		t.Fatalf("after down selection = %q, want alpha", got)
 	}
-	model, _ = model.update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("j")})
+	model, _ = model.update(tea.KeyMsg{Type: tea.KeyDown})
 	if got := model.selectedGroup(); got != "beta" {
-		t.Fatalf("after second j selection = %q, want beta", got)
+		t.Fatalf("after second down selection = %q, want beta", got)
 	}
 }
 
@@ -713,7 +770,7 @@ func TestCreateEmptyGroupPersistsToState(t *testing.T) {
 		State:     state.NewStore(),
 	})
 	model, _ = model.update(tea.KeyMsg{Type: tea.KeyTab})
-	model, _ = model.update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("a")})
+	model, _ = model.update(tea.KeyMsg{Type: tea.KeyCtrlA})
 	if model.mode != modeGroupInline {
 		t.Fatalf("mode = %d, want modeGroupInline", model.mode)
 	}
@@ -749,7 +806,7 @@ func TestCreateEmptyGroupRejectsReservedName(t *testing.T) {
 		Entries: []sshconfig.HostEntry{{Alias: "a", Group: "prod"}},
 	})
 	model, _ = model.update(tea.KeyMsg{Type: tea.KeyTab})
-	model, _ = model.update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("a")})
+	model, _ = model.update(tea.KeyMsg{Type: tea.KeyCtrlA})
 	for _, r := range "all" {
 		model, _ = model.update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{r}})
 	}
@@ -772,11 +829,11 @@ func TestRenameEmptyGroupKeepsItStateOnly(t *testing.T) {
 	model, _ = model.update(tea.WindowSizeMsg{Width: 140, Height: 30})
 	model, _ = model.update(tea.KeyMsg{Type: tea.KeyTab})
 	// Move to "lab" in sidebar (sorted: all, lab, prod).
-	model, _ = model.update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("j")})
+	model, _ = model.update(tea.KeyMsg{Type: tea.KeyDown})
 	if got := model.selectedGroup(); got != "lab" {
 		t.Fatalf("expected to land on lab, got %q", got)
 	}
-	model, _ = model.update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("r")})
+	model, _ = model.update(tea.KeyMsg{Type: tea.KeyCtrlR})
 	// buffer pre-fills with "lab"; clear it and type "future-east"
 	for i := 0; i < 3; i++ {
 		model, _ = model.update(tea.KeyMsg{Type: tea.KeyBackspace})
@@ -808,11 +865,11 @@ func TestMovingMarkedHostsBuildsConfirmPanel(t *testing.T) {
 	model.selected = map[string]bool{"a": true, "b": true}
 	model, _ = model.update(tea.KeyMsg{Type: tea.KeyTab})
 	// move sidebar to "dev" (sorted: all, dev, prod)
-	model, _ = model.update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("j")})
+	model, _ = model.update(tea.KeyMsg{Type: tea.KeyDown})
 	if got := model.selectedGroup(); got != "dev" {
 		t.Fatalf("sidebar at %q, want dev", got)
 	}
-	model, _ = model.update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("M")})
+	model, _ = model.update(tea.KeyMsg{Type: tea.KeyCtrlG})
 	if model.mode != modeConfirm {
 		t.Fatalf("mode = %d, want modeConfirm", model.mode)
 	}
@@ -837,7 +894,7 @@ func TestGroupPickerMovesCurrentHostWhenNoneMarked(t *testing.T) {
 	})
 	model.cursor = 1
 
-	model, _ = model.update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("g")})
+	model, _ = model.update(tea.KeyMsg{Type: tea.KeyCtrlG})
 	if model.mode != modeGroupPicker {
 		t.Fatalf("mode = %d, want modeGroupPicker", model.mode)
 	}
@@ -869,7 +926,7 @@ func TestGroupPickerMovesMarkedHostsToSelectedGroup(t *testing.T) {
 	})
 	model.selected = map[string]bool{"a": true, "b": true}
 
-	model, _ = model.update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("g")})
+	model, _ = model.update(tea.KeyMsg{Type: tea.KeyCtrlG})
 	model, _ = model.update(tea.KeyMsg{Type: tea.KeyDown})
 	model, _ = model.update(tea.KeyMsg{Type: tea.KeyEnter})
 
@@ -891,7 +948,7 @@ func TestGroupPickerMovesToNewGroupName(t *testing.T) {
 		},
 	})
 
-	model, _ = model.update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("g")})
+	model, _ = model.update(tea.KeyMsg{Type: tea.KeyCtrlG})
 	for _, r := range "lab" {
 		model, _ = model.update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{r}})
 	}
@@ -915,7 +972,7 @@ func TestGroupPickerRejectsInvalidGroupName(t *testing.T) {
 		},
 	})
 
-	model, _ = model.update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("g")})
+	model, _ = model.update(tea.KeyMsg{Type: tea.KeyCtrlG})
 	for _, r := range "bad group" {
 		model, _ = model.update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{r}})
 	}
@@ -939,7 +996,7 @@ func TestGroupPickerEscCancelsWithoutPending(t *testing.T) {
 		},
 	})
 
-	model, _ = model.update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("g")})
+	model, _ = model.update(tea.KeyMsg{Type: tea.KeyCtrlG})
 	model, _ = model.update(tea.KeyMsg{Type: tea.KeyEsc})
 
 	if model.mode != modeBrowse {
@@ -963,7 +1020,7 @@ func TestGroupPickerMoveToEmptyGroupDropsPlaceholderAfterWrite(t *testing.T) {
 		State: store,
 	})
 
-	model, _ = model.update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("g")})
+	model, _ = model.update(tea.KeyMsg{Type: tea.KeyCtrlG})
 	for _, r := range "lab" {
 		model, _ = model.update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{r}})
 	}
@@ -987,15 +1044,15 @@ func TestShiftGroupOrderInjectsAndSwaps(t *testing.T) {
 	})
 	model, _ = model.update(tea.WindowSizeMsg{Width: 140, Height: 30})
 	model, _ = model.update(tea.KeyMsg{Type: tea.KeyTab})
-	// move to gamma (all, alpha, beta, gamma → 3 j presses)
-	model, _ = model.update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("j")})
-	model, _ = model.update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("j")})
-	model, _ = model.update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("j")})
+	// move to gamma (all, alpha, beta, gamma -> 3 down presses)
+	model, _ = model.update(tea.KeyMsg{Type: tea.KeyDown})
+	model, _ = model.update(tea.KeyMsg{Type: tea.KeyDown})
+	model, _ = model.update(tea.KeyMsg{Type: tea.KeyDown})
 	if got := model.selectedGroup(); got != "gamma" {
 		t.Fatalf("sidebar at %q, want gamma", got)
 	}
-	// K shifts up. With empty GroupOrder, gamma is injected then moved up.
-	model, _ = model.update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("K")})
+	// Ctrl+Up shifts up. With empty GroupOrder, gamma is injected then moved up.
+	model, _ = model.update(tea.KeyMsg{Type: tea.KeyCtrlUp})
 	if len(model.state.GroupOrder) == 0 {
 		t.Fatalf("GroupOrder still empty after shift")
 	}
@@ -1009,7 +1066,7 @@ func TestFormGroupFieldTabCyclesKnownGroups(t *testing.T) {
 		Entries:    []sshconfig.HostEntry{{Alias: "a", Group: "alpha"}, {Alias: "b", Group: "beta"}},
 		ConfigPath: "/tmp/cfg",
 	})
-	model, _ = model.update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("A")})
+	model, _ = model.update(tea.KeyMsg{Type: tea.KeyCtrlA})
 	if model.mode != modeForm {
 		t.Fatalf("mode = %d, want modeForm", model.mode)
 	}
@@ -1076,7 +1133,7 @@ func TestModelAddHostFlowWritesConfigAndReloads(t *testing.T) {
 	model := NewModel(Config{ConfigPath: path, Load: load})
 
 	var cmd tea.Cmd
-	model, cmd = model.update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("A")})
+	model, cmd = model.update(tea.KeyMsg{Type: tea.KeyCtrlA})
 	if cmd != nil || model.mode != modeForm || model.form.operation != operationAdd {
 		t.Fatalf("expected add form, model=%#v cmd=%v", model, cmd)
 	}
@@ -1114,7 +1171,7 @@ func TestModelEditRejectsInvalidPortBeforeConfirm(t *testing.T) {
 	model := NewModel(Config{Entries: []sshconfig.HostEntry{{Alias: "prod", SourceFile: "config", SourceLine: 1}}})
 
 	var cmd tea.Cmd
-	model, cmd = model.update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("e")})
+	model, cmd = model.update(tea.KeyMsg{Type: tea.KeyCtrlE})
 	if cmd != nil || model.mode != modeForm || model.form.operation != operationEdit {
 		t.Fatalf("expected edit form, model=%#v cmd=%v", model, cmd)
 	}
@@ -1144,7 +1201,7 @@ Host prod
 	model := NewModel(Config{ConfigPath: path, Entries: entries, Warnings: warnings, Load: load})
 
 	var cmd tea.Cmd
-	model, cmd = model.update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("d")})
+	model, cmd = model.update(tea.KeyMsg{Type: tea.KeyCtrlD})
 	if cmd != nil || model.mode != modeConfirm || model.pending.operation != operationDelete {
 		t.Fatalf("expected delete confirm, model=%#v cmd=%v", model, cmd)
 	}
@@ -1275,7 +1332,7 @@ func TestWarningsPanelOpensAndCloses(t *testing.T) {
 		Warnings: []sshconfig.Warning{{Path: "config", Line: 3, Message: "bad include"}},
 	})
 
-	model, _ = model.update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("W")})
+	model, _ = model.update(tea.KeyMsg{Type: tea.KeyCtrlW})
 	if model.mode != modeWarnings {
 		t.Fatalf("mode = %v, want warnings", model.mode)
 	}
@@ -1290,7 +1347,7 @@ func TestWarningsPanelOpensAndCloses(t *testing.T) {
 
 func TestFormCursorEditsInsideFieldAndClears(t *testing.T) {
 	model := NewModel(Config{})
-	model, _ = model.update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("A")})
+	model, _ = model.update(tea.KeyMsg{Type: tea.KeyCtrlA})
 	for _, r := range "prod" {
 		model, _ = model.update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{r}})
 	}
@@ -1321,7 +1378,7 @@ func TestManualMonitorRefreshOpensPanelAndProbes(t *testing.T) {
 		Probe:   probe,
 	})
 
-	model, cmd := model.update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("R")})
+	model, cmd := model.update(tea.KeyMsg{Type: tea.KeyCtrlT})
 	if cmd == nil {
 		t.Fatal("expected monitor probe command")
 	}
@@ -1340,12 +1397,12 @@ func TestManualMonitorRefreshOpensPanelAndProbes(t *testing.T) {
 func TestSettingsShortcutOpensSettingsMode(t *testing.T) {
 	model := NewModel(Config{Entries: []sshconfig.HostEntry{{Alias: "prod"}}})
 
-	model, _ = model.update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("o")})
+	model, _ = model.update(tea.KeyMsg{Type: tea.KeyCtrlO})
 
 	if model.mode != modeSettings {
 		t.Fatalf("mode = %v, want settings", model.mode)
 	}
-	if model.settings.openMode != "auto" || model.settings.terminal != "auto" {
+	if model.settings.openMode != "auto" || model.settings.terminal != "auto" || model.settings.density != "comfortable" {
 		t.Fatalf("settings = %#v, want default auto values", model.settings)
 	}
 }
@@ -1360,10 +1417,12 @@ func TestSettingsSaveUpdatesStateManagerAndVisibility(t *testing.T) {
 		},
 	})
 
-	model, _ = model.update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("o")})
+	model, _ = model.update(tea.KeyMsg{Type: tea.KeyCtrlO})
 	model, _ = model.update(tea.KeyMsg{Type: tea.KeyRight})
 	model, _ = model.update(tea.KeyMsg{Type: tea.KeyDown})
 	model, _ = model.update(tea.KeyMsg{Type: tea.KeyRight})
+	model, _ = model.update(tea.KeyMsg{Type: tea.KeyDown})
+	model, _ = model.update(tea.KeyMsg{Type: tea.KeySpace})
 	model, _ = model.update(tea.KeyMsg{Type: tea.KeyDown})
 	model, _ = model.update(tea.KeyMsg{Type: tea.KeySpace})
 	model, _ = model.update(tea.KeyMsg{Type: tea.KeyDown})
@@ -1387,16 +1446,16 @@ func TestSettingsSaveUpdatesStateManagerAndVisibility(t *testing.T) {
 	if model.previewVisible || !model.showRawPreview || !model.monitorVisible {
 		t.Fatalf("visibility preview=%v raw=%v monitor=%v, want false true true", model.previewVisible, model.showRawPreview, model.monitorVisible)
 	}
-	if model.state.Settings == nil || model.state.Settings.OpenMode != "split" || model.state.Settings.Terminal != "iterm" {
-		t.Fatalf("state settings = %#v, want iterm split", model.state.Settings)
+	if model.density != "compact" || model.state.Settings == nil || model.state.Settings.OpenMode != "split" || model.state.Settings.Terminal != "iterm" || model.state.Settings.Density != "compact" {
+		t.Fatalf("state settings = %#v density=%q, want iterm split compact", model.state.Settings, model.density)
 	}
 	model, _ = model.update(cmd())
 	loaded, err := state.Load(statePath)
 	if err != nil {
 		t.Fatalf("load saved state: %v", err)
 	}
-	if loaded.Settings == nil || loaded.Settings.OpenMode != "split" || loaded.Settings.Terminal != "iterm" {
-		t.Fatalf("saved settings = %#v, want iterm split", loaded.Settings)
+	if loaded.Settings == nil || loaded.Settings.OpenMode != "split" || loaded.Settings.Terminal != "iterm" || loaded.Settings.Density != "compact" {
+		t.Fatalf("saved settings = %#v, want iterm split compact", loaded.Settings)
 	}
 }
 
@@ -1404,7 +1463,7 @@ func TestSettingsEscCancelsWithoutSaving(t *testing.T) {
 	model := NewModel(Config{Entries: []sshconfig.HostEntry{{Alias: "prod"}}})
 	originalOpenMode := model.manager.OpenMode
 
-	model, _ = model.update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("o")})
+	model, _ = model.update(tea.KeyMsg{Type: tea.KeyCtrlO})
 	model, _ = model.update(tea.KeyMsg{Type: tea.KeyRight})
 	model, _ = model.update(tea.KeyMsg{Type: tea.KeyEsc})
 
@@ -1422,7 +1481,7 @@ func TestSettingsEscCancelsWithoutSaving(t *testing.T) {
 func TestCommandPaletteCanOpenSettings(t *testing.T) {
 	model := NewModel(Config{Entries: []sshconfig.HostEntry{{Alias: "prod"}}})
 
-	model, _ = model.update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(":")})
+	model, _ = model.update(tea.KeyMsg{Type: tea.KeyCtrlK})
 	for _, r := range "settings" {
 		model, _ = model.update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{r}})
 	}

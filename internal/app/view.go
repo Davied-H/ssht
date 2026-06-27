@@ -37,8 +37,8 @@ var (
 )
 
 const (
-	footerPrimary       = "Enter connect · o settings · : commands · / search · Space mark · g move · ? help"
-	footerSecondary     = "H history · P preview · v expand · M monitor · r reload"
+	footerPrimary       = "1-9 quick connect · type search · Enter connect · Ctrl+K commands · Ctrl+O settings · Space mark"
+	footerSecondary     = "Ctrl+G move · Ctrl+F favorite · Ctrl+L help · Ctrl+R reload"
 	previewMinWidth     = 26
 	previewBaseWidth    = 50
 	previewMaxWidth     = 80
@@ -157,13 +157,13 @@ func (m Model) footerLines() []string {
 	if m.searchActive {
 		primary = "type query · Enter apply · Esc close · Ctrl+U clear"
 	} else if m.focus == focusSidebar {
-		primary = "Enter select group · a create · r rename · d delete · J/K reorder · Esc list"
+		primary = "Enter select group · Ctrl+A create · Ctrl+R rename · Ctrl+D delete · Ctrl+↑/↓ reorder · Esc list"
 	} else if len(m.selected) > 0 {
-		primary = "Enter connect marked · Space unmark · g move marked · : commands · W warnings"
+		primary = "Enter connect marked · Space unmark · Ctrl+G move marked · Ctrl+K commands · Ctrl+W warnings"
 	} else if m.filter != "" {
-		primary = "Enter connect · / search · g move · Space mark · e edit"
+		primary = "Enter connect · type edit search · Ctrl+G move · Space mark · Ctrl+E edit"
 	} else if m.monitor != nil && m.monitorVisible {
-		secondary = "R refresh monitor · P preview · v expand · r reload · W warnings"
+		secondary = "Ctrl+T refresh monitor · Ctrl+P preview · Ctrl+V expand · Ctrl+R reload · Ctrl+W warnings"
 	}
 	rendered := keyHints(strings.Split(primary, " · ")...)
 	lines := []string{commandLine(rendered, m.width)}
@@ -380,6 +380,8 @@ func (m Model) settingDisplayValue(id string) string {
 		return accentStyle.Render(m.settings.openMode)
 	case "terminal":
 		return accentStyle.Render(m.settings.terminal)
+	case "density":
+		return accentStyle.Render(m.settings.density)
 	case "preview":
 		return boolSettingLabel(m.settings.previewVisible)
 	case "raw-preview":
@@ -598,10 +600,14 @@ func (m Model) filterLine() string {
 	}
 	prompt := infoStyle.Render(" Filter ")
 	if m.filter == "" {
-		return fillLine(filterBarStyle.Render(" "+prompt+mutedStyle.Render("/ search · user:deploy · group:prod · -db · tag:<name>")+" "), m.width)
+		hint := "type to search · / edit · user:deploy · group:prod · -db · tag:<name>"
+		if quick := m.quickHintLine(); quick != "" {
+			hint = "quick " + quick + " · " + hint
+		}
+		return fillLine(filterBarStyle.Render(" "+prompt+mutedStyle.Render(hint)+" "), m.width)
 	}
 	summary := fmt.Sprintf("  %d/%d matches", len(m.filtered), len(m.entries))
-	return fillLine(filterBarStyle.Render(" "+prompt+m.filter+dimStyle.Render(summary+" · / edit · Ctrl+U clear in search")+" "), m.width)
+	return fillLine(filterBarStyle.Render(" "+prompt+m.filter+dimStyle.Render(summary+" · type to edit · Ctrl+U clear in search")+" "), m.width)
 }
 
 func (m Model) splitColumns() (left, right int) {
@@ -906,7 +912,7 @@ func (m Model) listHeader(width int) string {
 	if m.focus == focusList && !m.searchActive {
 		label = focusStyle.Render("HOST")
 	}
-	header := "  " + dimStyle.Render("state") + " " + label
+	header := "  " + dimStyle.Render("quick state") + " " + label
 	if len(m.filtered) > 0 {
 		pos := fmt.Sprintf("%d/%d", m.cursor+1, len(m.filtered))
 		right := dimStyle.Render(pos)
@@ -928,20 +934,14 @@ func (m Model) listHeader(width int) string {
 func (m Model) formatListRow(i, width int, showGroup bool) string {
 	entry := m.filtered[i]
 	markers := m.entryMarkerCell(entry)
+	slot := m.quickSlotCell(entry)
 	connection := connectionString(entry)
 	if strings.TrimSpace(m.filter) != "" {
 		if context := m.searchContext(entry, m.filter); context != "" {
 			connection = "match: " + context
 		}
 	}
-	if showGroup && entry.Group != "" {
-		group := "[" + entry.Group + "]"
-		if connection == "" {
-			connection = group
-		} else {
-			connection = group + " " + connection
-		}
-	}
+	meta := m.listMeta(entry, connection, showGroup)
 
 	prefix := "  "
 	if i == m.cursor {
@@ -951,8 +951,8 @@ func (m Model) formatListRow(i, width int, showGroup bool) string {
 	aliasReserve := 24
 	connectionReserve := 0
 	if width > 0 {
-		// total = prefix + status cell + space + alias + space + connection.
-		base := 2 + 5 + 1 + 1
+		// total = prefix + quick cell + status cell + spaces + alias + meta.
+		base := 2 + 3 + 3 + 3
 		fluid := width - base
 		if fluid < 8 {
 			aliasReserve = max(fluid, 1)
@@ -969,23 +969,123 @@ func (m Model) formatListRow(i, width int, showGroup bool) string {
 	aliasText := truncate(entry.Alias, aliasReserve)
 	alias := padRight(aliasText, aliasReserve)
 	connStr := ""
-	if connectionReserve > 0 && connection != "" {
-		connStr = " " + mutedStyle.Render(highlightSearchTerm(truncate(connection, connectionReserve), m.filter))
+	if connectionReserve > 0 && meta != "" {
+		connStr = " " + mutedStyle.Render(highlightSearchTerm(truncate(meta, connectionReserve), m.filter))
 	}
 
 	renderedAlias := titleStyle.Render(alias)
 	if i != m.cursor {
 		renderedAlias = titleStyle.Render(highlightSearchTerm(alias, m.filter))
 	}
-	row := prefix + markers + " " + renderedAlias + connStr
+	row := prefix + slot + markers + " " + renderedAlias + connStr
 	if i == m.cursor {
-		plainActive := prefix + markers + " " + highlightSearchTerm(alias, m.filter)
-		if connectionReserve > 0 && connection != "" {
-			plainActive += " " + truncate(connection, connectionReserve)
+		plainActive := prefix + quickSlotPlain(m.quickSlot(entry.Alias)) + entryMarkerPlain(m, entry) + " " + alias
+		if connectionReserve > 0 && meta != "" {
+			plainActive += " " + truncate(meta, connectionReserve)
 		}
 		row = activeRowStyle.Render(fitPlainRow(plainActive, width))
 	}
 	return row
+}
+
+func (m Model) quickSlotCell(entry sshconfig.HostEntry) string {
+	slot := m.quickSlot(entry.Alias)
+	if slot == 0 {
+		return "   "
+	}
+	return infoStyle.Render(fmt.Sprintf("%d  ", slot))
+}
+
+func quickSlotPlain(slot int) string {
+	if slot == 0 {
+		return "   "
+	}
+	return fmt.Sprintf("%d  ", slot)
+}
+
+func entryMarkerPlain(m Model, entry sshconfig.HostEntry) string {
+	markers := []rune{' ', ' ', ' '}
+	if m.selected[entry.Alias] {
+		markers[0] = '✓'
+	}
+	hostState := m.state.Hosts[entry.Alias]
+	if hostState.Favorite {
+		markers[1] = '★'
+	}
+	if hostState.LastConnectedAt != "" {
+		markers[2] = '●'
+	}
+	return string(markers)
+}
+
+func (m Model) listMeta(entry sshconfig.HostEntry, connection string, showGroup bool) string {
+	parts := []string{}
+	if env := inferredEnvironment(entry); env != "" {
+		parts = append(parts, "["+env+"]")
+	}
+	if showGroup && entry.Group != "" {
+		parts = append(parts, "["+entry.Group+"]")
+	}
+	if connection != "" {
+		parts = append(parts, connection)
+	}
+	if m.density != "compact" {
+		if risk := compactRiskLabel(entry); risk != "" {
+			parts = append(parts, risk)
+		}
+	}
+	return strings.Join(parts, " ")
+}
+
+func (m Model) quickHintLine() string {
+	hosts := m.quickConnectEntries()
+	if len(hosts) == 0 {
+		return ""
+	}
+	limit := min(len(hosts), 5)
+	parts := make([]string, 0, limit)
+	for i := 0; i < limit; i++ {
+		parts = append(parts, fmt.Sprintf("%d=%s", i+1, hosts[i].Alias))
+	}
+	return strings.Join(parts, "  ")
+}
+
+func inferredEnvironment(entry sshconfig.HostEntry) string {
+	text := strings.ToLower(strings.Join([]string{
+		entry.Alias,
+		entry.Group,
+		entry.HostName,
+		strings.Join(entry.Tags, " "),
+	}, " "))
+	switch {
+	case strings.Contains(text, "prod"), strings.Contains(text, "production"), strings.Contains(text, "prd"), strings.Contains(text, "线上"), strings.Contains(text, "生产"):
+		return "prod"
+	case strings.Contains(text, "stage"), strings.Contains(text, "staging"), strings.Contains(text, "预发"):
+		return "stage"
+	case strings.Contains(text, "test"), strings.Contains(text, "qa"), strings.Contains(text, "测试"):
+		return "test"
+	case strings.Contains(text, "dev"), strings.Contains(text, "develop"), strings.Contains(text, "开发"):
+		return "dev"
+	default:
+		return ""
+	}
+}
+
+func compactRiskLabel(entry sshconfig.HostEntry) string {
+	risks := []string{}
+	if strings.EqualFold(entry.User, "root") {
+		risks = append(risks, "root")
+	}
+	if entry.ProxyJump != "" || entry.ProxyCommand != "" {
+		risks = append(risks, "jump")
+	}
+	if entry.SSHPassword != "" {
+		risks = append(risks, "password")
+	}
+	if len(risks) == 0 {
+		return ""
+	}
+	return "!" + strings.Join(risks, ",")
 }
 
 func (m Model) hasMultipleGroups() bool {
@@ -1189,44 +1289,49 @@ func (m Model) helpView() string {
 	return strings.Join([]string{
 		titleStyle.Render("ssht help"),
 		"",
+		"1-9    Quick-connect the numbered host in the current list.",
+		"type   Start search with the typed character.",
 		"/      Enter search mode and edit the current filter.",
 		"Ctrl+U Clear the filter while search mode is active.",
-		":      Open the command palette (Ctrl+K also works).",
-		"o      Open settings for terminal mode and common UI preferences.",
+		"Ctrl+K Open the command palette.",
+		"Ctrl+O Open settings for terminal mode and common UI preferences.",
 		"Enter  Open the selected host using the configured terminal mode.",
 		"Space  Mark or unmark a host for batch connect across filters/groups.",
-		"f      Toggle favorite for the selected host.",
-		"g      Move current/marked host(s) to a group (recommended).",
-		"P      Toggle the right preview pane.",
-		"v      Toggle expanded preview (full top processes, raw config, all tags).",
-		"M      Toggle the SSH monitoring panel (Health + Top CPU).",
-		"R      Refresh the selected host's monitor snapshot now.",
-		"H      Show local connection history.",
-		"W      Show parser warnings.",
+		"Ctrl+F Toggle favorite for the selected host.",
+		"Ctrl+G Move current/marked host(s) to a group (recommended).",
+		"Ctrl+P Toggle the right preview pane.",
+		"Ctrl+V Toggle expanded preview (full top processes, raw config, all tags).",
+		"Ctrl+N Toggle the SSH monitoring panel (Health + Top CPU).",
+		"Ctrl+T Refresh the selected host's monitor snapshot now.",
+		"Ctrl+Y Show local connection history.",
+		"Ctrl+W Show parser warnings.",
 		"PgUp/PgDn/Home/End  Move quickly through the host list.",
 		"Tab    Toggle focus between host list and group sidebar.",
-		"←/→    Move between groups (also [ and ]).",
-		"e      Edit the selected host.",
-		"A      Add a new host.",
-		"d      Delete the selected host.",
-		"r      Reload SSH config.",
-		"?      Toggle this help.",
-		"q/Esc  Quit.",
+		"←/→    Move between groups.",
+		"Ctrl+E Edit the selected host.",
+		"Ctrl+A Add a new host.",
+		"Ctrl+D Delete the selected host.",
+		"Ctrl+R Reload SSH config.",
+		"Ctrl+L Toggle this help.",
+		"Esc    Quit.",
 		"",
 		titleStyle.Render("Sidebar (Tab to focus)"),
-		"j/k    Move group cursor.",
+		"↑/↓    Move group cursor.",
 		"Enter  Confirm and switch focus back to host list.",
-		"a      Create an empty group placeholder.",
-		"r      Rename the current group (rewrites SSH config comments).",
-		"m      Merge the current group into another group.",
-		"d      Delete the current group (its hosts move to ungrouped).",
-		"M      Move marked hosts (Space) into the current group (advanced; g is faster from the host list).",
-		"J/K    Shift the current group down/up in the saved order.",
+		"Ctrl+A Create an empty group placeholder.",
+		"Ctrl+R Rename the current group (rewrites SSH config comments).",
+		"Ctrl+B Merge the current group into another group.",
+		"Ctrl+D Delete the current group (its hosts move to ungrouped).",
+		"Ctrl+G Move marked hosts (Space) into the current group (advanced; Ctrl+G is faster from the host list).",
+		"Ctrl+↑/↓ Shift the current group up/down in the saved order.",
 		"Esc    Return focus to host list.",
 		"",
 		titleStyle.Render("Form Group field"),
 		"Tab    Cycle through known group names while in the Group field.",
 		"Ctrl+U Clear the current field; Ctrl+A/Ctrl+E move to field start/end.",
+		"",
+		titleStyle.Render("Settings"),
+		"Density comfortable keeps environment/risk context visible; compact saves horizontal space.",
 		"",
 		mutedStyle.Render("Search supports tag:<name>, fav:, recent:, user:, port:, group:, jump:, file:, alias:, and negation like -db. Connection command: ssh <alias>; OpenSSH resolves the full config."),
 	}, "\n")

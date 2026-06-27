@@ -60,6 +60,7 @@ type Model struct {
 
 	showRawPreview bool
 	previewVisible bool
+	density        string
 
 	monitor        *monitor.Cache
 	probe          monitor.ProbeFunc
@@ -109,7 +110,7 @@ type formState struct {
 }
 
 // groupInlineState holds the temporary input buffer for the lightweight
-// modeGroupInline (used by sidebar `a` create / `r` rename actions).
+// modeGroupInline (used by sidebar group create / rename actions).
 type groupInlineState struct {
 	action groupInlineAction
 	buffer string
@@ -124,7 +125,7 @@ const (
 	groupInlineRename
 )
 
-// groupPickerState holds the temporary target selection for list-level `g`
+// groupPickerState holds the temporary target selection for list-level group
 // moves. movingHosts is fixed when the picker opens so filter/cursor changes do
 // not change the operation's source set.
 type groupPickerState struct {
@@ -142,6 +143,7 @@ type settingsState struct {
 	field          int
 	terminal       string
 	openMode       string
+	density        string
 	previewVisible bool
 	showRawPreview bool
 	monitorVisible bool
@@ -230,6 +232,7 @@ func NewModel(cfg Config) Model {
 		now:            now,
 		status:         statusFromWarnings(cfg.Warnings),
 		previewVisible: true,
+		density:        "comfortable",
 		monitor:        cfg.Monitor,
 		probe:          cfg.Probe,
 		monitorVisible: cfg.MonitorVisible,
@@ -403,6 +406,80 @@ func (m Model) handleKey(key tea.KeyMsg) (Model, tea.Cmd) {
 		return m.prepareConnect()
 	case tea.KeyCtrlK:
 		return m.startCommandPalette(), nil
+	case tea.KeyCtrlO:
+		return m.startSettings(), nil
+	case tea.KeyCtrlL:
+		m.showHelp = !m.showHelp
+	case tea.KeyCtrlY:
+		m.mode = modeHistory
+		m.status = ""
+	case tea.KeyCtrlW:
+		if len(m.warnings) == 0 {
+			m.status = "no warnings"
+			return m, nil
+		}
+		m.mode = modeWarnings
+		m.status = ""
+		return m, nil
+	case tea.KeyCtrlA:
+		m.mode = modeForm
+		m.status = ""
+		m.form = formState{
+			operation: operationAdd,
+			values:    sshconfig.HostForm{},
+			cursor:    0,
+		}
+	case tea.KeyCtrlE:
+		entry, ok := m.Selected()
+		if !ok {
+			m.status = "no host selected"
+			return m, nil
+		}
+		values := formFromEntry(entry)
+		m.mode = modeForm
+		m.status = ""
+		m.form = formState{
+			operation: operationEdit,
+			entry:     entry,
+			values:    values,
+			cursor:    formFieldLen(values, 0),
+		}
+	case tea.KeyCtrlG:
+		return m.startGroupPicker()
+	case tea.KeyCtrlD:
+		entry, ok := m.Selected()
+		if !ok {
+			m.status = "no host selected"
+			return m, nil
+		}
+		m.mode = modeConfirm
+		m.status = ""
+		m.pending = pendingOperation{
+			operation: operationDelete,
+			entry:     entry,
+			target:    entry.SourceFile,
+		}
+	case tea.KeyCtrlR:
+		return m, m.reloadCmd()
+	case tea.KeyCtrlT:
+		return m.refreshMonitor()
+	case tea.KeyCtrlF:
+		return m.toggleFavorite()
+	case tea.KeyCtrlV:
+		m.showRawPreview = !m.showRawPreview
+		return m, nil
+	case tea.KeyCtrlP:
+		return m.togglePreview(), nil
+	case tea.KeyCtrlN:
+		if m.monitor != nil {
+			m.monitorVisible = !m.monitorVisible
+			if m.monitorVisible {
+				m.status = "monitor on"
+			} else {
+				m.status = "monitor off"
+			}
+		}
+		return m, nil
 	case tea.KeySpace:
 		return m.toggleSelected(), nil
 	case tea.KeyUp:
@@ -431,90 +508,10 @@ func (m Model) handleKey(key tea.KeyMsg) (Model, tea.Cmd) {
 		if key.String() == "/" {
 			return m.startSearch(), nil
 		}
-		switch key.String() {
-		case "q":
-			return m, tea.Quit
-		case ":":
-			return m.startCommandPalette(), nil
-		case "o":
-			return m.startSettings(), nil
-		case "?":
-			m.showHelp = !m.showHelp
-		case "H":
-			m.mode = modeHistory
-			m.status = ""
-		case "W":
-			if len(m.warnings) == 0 {
-				m.status = "no warnings"
-				return m, nil
-			}
-			m.mode = modeWarnings
-			m.status = ""
-			return m, nil
-		case "A":
-			m.mode = modeForm
-			m.status = ""
-			m.form = formState{
-				operation: operationAdd,
-				values:    sshconfig.HostForm{},
-				cursor:    0,
-			}
-		case "e":
-			entry, ok := m.Selected()
-			if !ok {
-				m.status = "no host selected"
-				return m, nil
-			}
-			values := formFromEntry(entry)
-			m.mode = modeForm
-			m.status = ""
-			m.form = formState{
-				operation: operationEdit,
-				entry:     entry,
-				values:    values,
-				cursor:    formFieldLen(values, 0),
-			}
-		case "g":
-			return m.startGroupPicker()
-		case "d":
-			entry, ok := m.Selected()
-			if !ok {
-				m.status = "no host selected"
-				return m, nil
-			}
-			m.mode = modeConfirm
-			m.status = ""
-			m.pending = pendingOperation{
-				operation: operationDelete,
-				entry:     entry,
-				target:    entry.SourceFile,
-			}
-		case "r":
-			return m, m.reloadCmd()
-		case "R":
-			return m.refreshMonitor()
-		case "f":
-			return m.toggleFavorite()
-		case "v":
-			m.showRawPreview = !m.showRawPreview
-			return m, nil
-		case "P":
-			return m.togglePreview(), nil
-		case "M":
-			if m.monitor != nil {
-				m.monitorVisible = !m.monitorVisible
-				if m.monitorVisible {
-					m.status = "monitor on"
-				} else {
-					m.status = "monitor off"
-				}
-			}
-			return m, nil
-		case "[":
-			m.moveGroup(-1)
-		case "]":
-			m.moveGroup(1)
+		if digit, ok := quickConnectDigit(key.String()); ok {
+			return m.prepareQuickConnect(digit)
 		}
+		return m.startSearchWith(key.String()), nil
 	}
 	return m, nil
 }
@@ -634,6 +631,14 @@ func (m Model) startSearch() Model {
 	return m
 }
 
+func (m Model) startSearchWith(text string) Model {
+	m = m.startSearch()
+	m.filter += text
+	m.cursor = 0
+	m.applyFilter()
+	return m
+}
+
 func (m Model) handleSearchKey(key tea.KeyMsg) (Model, tea.Cmd) {
 	switch key.Type {
 	case tea.KeyCtrlC:
@@ -671,12 +676,74 @@ func (m Model) togglePreview() Model {
 }
 
 // handleSidebarKey is invoked from handleKey when focus is on the sidebar
-// (and we are still in modeBrowse). It scopes navigation and group management
-// keys (a/r/m/d/M/J/K) to the sidebar context.
+// (and we are still in modeBrowse). It scopes navigation and Ctrl-based group
+// management shortcuts to the sidebar context.
 func (m Model) handleSidebarKey(key tea.KeyMsg) (Model, tea.Cmd) {
 	switch key.Type {
 	case tea.KeyCtrlC:
 		return m, tea.Quit
+	case tea.KeyCtrlK:
+		m.focus = focusList
+		return m.startCommandPalette(), nil
+	case tea.KeyCtrlO:
+		m.focus = focusList
+		return m.startSettings(), nil
+	case tea.KeyCtrlL:
+		m.showHelp = !m.showHelp
+		return m, nil
+	case tea.KeyCtrlY:
+		m.mode = modeHistory
+		m.status = ""
+		return m, nil
+	case tea.KeyCtrlW:
+		if len(m.warnings) == 0 {
+			m.status = "no warnings"
+			return m, nil
+		}
+		m.mode = modeWarnings
+		m.status = ""
+		return m, nil
+	case tea.KeyCtrlT:
+		m.focus = focusList
+		return m.refreshMonitor()
+	case tea.KeyCtrlP:
+		return m.togglePreview(), nil
+	case tea.KeyCtrlA:
+		m.mode = modeGroupInline
+		m.groupInline = groupInlineState{action: groupInlineCreate}
+		m.status = ""
+		return m, nil
+	case tea.KeyCtrlR:
+		current := m.selectedGroup()
+		if current == "all" || current == "ungrouped" {
+			m.status = "cannot rename reserved group"
+			return m, nil
+		}
+		m.mode = modeGroupInline
+		m.groupInline = groupInlineState{action: groupInlineRename, target: current, buffer: current}
+		m.status = ""
+		return m, nil
+	case tea.KeyCtrlB:
+		current := m.selectedGroup()
+		if current == "all" || current == "ungrouped" {
+			m.status = "cannot merge reserved group"
+			return m, nil
+		}
+		return m.startGroupMerge(current)
+	case tea.KeyCtrlD:
+		current := m.selectedGroup()
+		if current == "all" || current == "ungrouped" {
+			m.status = "cannot delete reserved group"
+			return m, nil
+		}
+		return m.startGroupDelete(current)
+	case tea.KeyCtrlG:
+		current := m.selectedGroup()
+		return m.startMoveMarkedHosts(current)
+	case tea.KeyCtrlDown:
+		return m.shiftGroupOrder(m.selectedGroup(), 1)
+	case tea.KeyCtrlUp:
+		return m.shiftGroupOrder(m.selectedGroup(), -1)
 	case tea.KeyEsc:
 		m.focus = focusList
 		m.status = ""
@@ -700,86 +767,10 @@ func (m Model) handleSidebarKey(key tea.KeyMsg) (Model, tea.Cmd) {
 		m.moveGroup(1)
 		return m, nil
 	case tea.KeyRunes:
-		switch key.String() {
-		case "q":
-			return m, tea.Quit
-		case ":":
-			m.focus = focusList
-			return m.startCommandPalette(), nil
-		case "o":
-			m.focus = focusList
-			return m.startSettings(), nil
-		case "?":
-			m.showHelp = !m.showHelp
-			return m, nil
-		case "H":
-			m.mode = modeHistory
-			m.status = ""
-			return m, nil
-		case "W":
-			if len(m.warnings) == 0 {
-				m.status = "no warnings"
-				return m, nil
-			}
-			m.mode = modeWarnings
-			m.status = ""
-			return m, nil
-		case "R":
-			m.focus = focusList
-			return m.refreshMonitor()
-		case "/":
+		if key.String() == "/" {
 			return m.startSearch(), nil
-		case "P":
-			return m.togglePreview(), nil
-		case "j":
-			m.moveGroup(1)
-			return m, nil
-		case "k":
-			m.moveGroup(-1)
-			return m, nil
-		case "[":
-			m.moveGroup(-1)
-			return m, nil
-		case "]":
-			m.moveGroup(1)
-			return m, nil
-		case "a":
-			m.mode = modeGroupInline
-			m.groupInline = groupInlineState{action: groupInlineCreate}
-			m.status = ""
-			return m, nil
-		case "r":
-			current := m.selectedGroup()
-			if current == "all" || current == "ungrouped" {
-				m.status = "cannot rename reserved group"
-				return m, nil
-			}
-			m.mode = modeGroupInline
-			m.groupInline = groupInlineState{action: groupInlineRename, target: current, buffer: current}
-			m.status = ""
-			return m, nil
-		case "m":
-			current := m.selectedGroup()
-			if current == "all" || current == "ungrouped" {
-				m.status = "cannot merge reserved group"
-				return m, nil
-			}
-			return m.startGroupMerge(current)
-		case "d":
-			current := m.selectedGroup()
-			if current == "all" || current == "ungrouped" {
-				m.status = "cannot delete reserved group"
-				return m, nil
-			}
-			return m.startGroupDelete(current)
-		case "M":
-			current := m.selectedGroup()
-			return m.startMoveMarkedHosts(current)
-		case "J":
-			return m.shiftGroupOrder(m.selectedGroup(), 1)
-		case "K":
-			return m.shiftGroupOrder(m.selectedGroup(), -1)
 		}
+		return m.startSearchWith(key.String()), nil
 	}
 	return m, nil
 }
@@ -1165,6 +1156,7 @@ func settingsStateFromModel(m Model) settingsState {
 	return settingsState{
 		terminal:       terminalPreference,
 		openMode:       openMode,
+		density:        m.density,
 		previewVisible: m.previewVisible,
 		showRawPreview: m.showRawPreview,
 		monitorVisible: m.monitorVisible,
@@ -1187,6 +1179,8 @@ func (m *Model) cycleSetting(delta int) {
 		m.settings.openMode = cycleStringOption(m.settings.openMode, settingOpenModes(), delta)
 	case "terminal":
 		m.settings.terminal = cycleStringOption(m.settings.terminal, settingTerminals(), delta)
+	case "density":
+		m.settings.density = cycleStringOption(m.settings.density, settingDensities(), delta)
 	case "preview":
 		m.settings.previewVisible = !m.settings.previewVisible
 	case "raw-preview":
@@ -1200,6 +1194,7 @@ func (m Model) commitSettings() (Model, tea.Cmd) {
 	m.state.Settings = &state.Settings{
 		OpenMode:       m.settings.openMode,
 		Terminal:       m.settings.terminal,
+		Density:        m.settings.density,
 		PreviewVisible: m.settings.previewVisible,
 		ShowRawPreview: m.settings.showRawPreview,
 		MonitorVisible: m.settings.monitorVisible,
@@ -1219,6 +1214,9 @@ func (m *Model) applySavedSettings(settings state.Settings, monitorExplicit bool
 	if validSettingsValue(settings.Terminal, settingTerminals()) {
 		next.terminal = settings.Terminal
 	}
+	if validSettingsValue(settings.Density, settingDensities()) {
+		next.density = settings.Density
+	}
 	next.previewVisible = settings.PreviewVisible
 	next.showRawPreview = settings.ShowRawPreview
 	if !monitorExplicit {
@@ -1237,6 +1235,10 @@ func (m *Model) applySettingsState(settings settingsState) {
 	m.previewVisible = settings.previewVisible
 	m.showRawPreview = settings.showRawPreview
 	m.monitorVisible = settings.monitorVisible
+	m.density = settings.density
+	if m.density == "" {
+		m.density = "comfortable"
+	}
 }
 
 func validSettingsValue(value string, options []string) bool {
@@ -1275,6 +1277,7 @@ func settingFields() []settingField {
 	return []settingField{
 		{id: "open-mode", label: "Open mode"},
 		{id: "terminal", label: "Terminal"},
+		{id: "density", label: "Density"},
 		{id: "preview", label: "Preview"},
 		{id: "raw-preview", label: "Raw preview"},
 		{id: "monitor", label: "Monitor"},
@@ -1287,6 +1290,10 @@ func settingOpenModes() []string {
 
 func settingTerminals() []string {
 	return []string{"auto", "iterm", "terminal", "wezterm", "kitty", "alacritty", "ghostty"}
+}
+
+func settingDensities() []string {
+	return []string{"comfortable", "compact"}
 }
 
 func (m Model) handleGroupPickerKey(key tea.KeyMsg) (Model, tea.Cmd) {
@@ -1720,6 +1727,18 @@ func (m Model) probeCmd(entry sshconfig.HostEntry) tea.Cmd {
 
 func (m Model) connectCmd() tea.Cmd {
 	targets := m.connectTargets()
+	return m.connectTargetsCmd(targets)
+}
+
+func (m Model) connectHostsCmd(hosts []sshconfig.HostEntry) tea.Cmd {
+	targets := make([]terminal.Target, 0, len(hosts))
+	for _, host := range hosts {
+		targets = append(targets, targetFromEntry(host))
+	}
+	return m.connectTargetsCmd(targets)
+}
+
+func (m Model) connectTargetsCmd(targets []terminal.Target) tea.Cmd {
 	if len(targets) == 0 {
 		return func() tea.Msg { return ConnectMsg{Err: fmt.Errorf("no host selected")} }
 	}
@@ -1749,6 +1768,18 @@ func (m Model) prepareConnect() (Model, tea.Cmd) {
 	return m, m.connectCmd()
 }
 
+func (m Model) prepareQuickConnect(slot int) (Model, tea.Cmd) {
+	hosts := m.quickConnectEntries()
+	if slot < 1 || slot > len(hosts) {
+		m.status = fmt.Sprintf("no quick host at %d", slot)
+		return m, nil
+	}
+	host := hosts[slot-1]
+	m.cursor = m.indexOfFilteredAlias(host.Alias)
+	m.status = "quick connect " + host.Alias
+	return m, m.connectHostsCmd([]sshconfig.HostEntry{host})
+}
+
 func (m Model) connectHostEntries() []sshconfig.HostEntry {
 	if len(m.selected) == 0 {
 		entry, ok := m.Selected()
@@ -1765,6 +1796,64 @@ func (m Model) connectHostEntries() []sshconfig.HostEntry {
 	}
 	sort.Slice(hosts, func(i, j int) bool { return hosts[i].Alias < hosts[j].Alias })
 	return hosts
+}
+
+func (m Model) quickConnectEntries() []sshconfig.HostEntry {
+	source := m.filtered
+	if strings.TrimSpace(m.filter) == "" && m.selectedGroup() == "all" {
+		source = m.entries
+	}
+	hosts := append([]sshconfig.HostEntry(nil), source...)
+	sort.SliceStable(hosts, func(i, j int) bool {
+		return m.lessQuick(hosts[i], hosts[j])
+	})
+	if len(hosts) > 9 {
+		hosts = hosts[:9]
+	}
+	return hosts
+}
+
+func (m Model) lessQuick(a, b sshconfig.HostEntry) bool {
+	aState := m.state.Hosts[a.Alias]
+	bState := m.state.Hosts[b.Alias]
+	if aState.Favorite != bState.Favorite {
+		return aState.Favorite
+	}
+	if aState.LastConnectedAt != bState.LastConnectedAt {
+		return aState.LastConnectedAt > bState.LastConnectedAt
+	}
+	if aState.ConnectCount != bState.ConnectCount {
+		return aState.ConnectCount > bState.ConnectCount
+	}
+	if strings.TrimSpace(a.Group) != strings.TrimSpace(b.Group) {
+		return strings.TrimSpace(a.Group) < strings.TrimSpace(b.Group)
+	}
+	return a.Alias < b.Alias
+}
+
+func (m Model) quickSlot(alias string) int {
+	for i, entry := range m.quickConnectEntries() {
+		if entry.Alias == alias {
+			return i + 1
+		}
+	}
+	return 0
+}
+
+func (m Model) indexOfFilteredAlias(alias string) int {
+	for i, entry := range m.filtered {
+		if entry.Alias == alias {
+			return i
+		}
+	}
+	return m.cursor
+}
+
+func quickConnectDigit(value string) (int, bool) {
+	if len(value) != 1 || value[0] < '1' || value[0] > '9' {
+		return 0, false
+	}
+	return int(value[0] - '0'), true
 }
 
 func (m Model) startCommandPalette() Model {

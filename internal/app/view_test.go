@@ -184,7 +184,7 @@ func TestPreviewPaneCanBeCollapsedWithShortcut(t *testing.T) {
 		t.Fatalf("preview should be visible before toggle")
 	}
 
-	model, _ = model.update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("P")})
+	model, _ = model.update(tea.KeyMsg{Type: tea.KeyCtrlP})
 	sidebar, list, preview := model.splitThreeColumns()
 	if preview != 0 {
 		t.Fatalf("preview width = %d, want 0", preview)
@@ -205,7 +205,7 @@ func TestPreviewPaneCanBeCollapsedFromSidebarFocus(t *testing.T) {
 	model := NewModel(Config{Entries: entries})
 	model, _ = model.update(tea.WindowSizeMsg{Width: 140, Height: 24})
 	model, _ = model.update(tea.KeyMsg{Type: tea.KeyTab})
-	model, _ = model.update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("P")})
+	model, _ = model.update(tea.KeyMsg{Type: tea.KeyCtrlP})
 
 	_, _, preview := model.splitThreeColumns()
 	if preview != 0 {
@@ -221,7 +221,7 @@ func TestBrowseViewRendersProfessionalStructureOnWideTerminal(t *testing.T) {
 	model := newWideModel(t, entries, state.NewStore())
 
 	view := model.View()
-	for _, want := range []string{"Groups", "state HOST", "Filter / search", "╭", "›"} {
+	for _, want := range []string{"Groups", "state HOST", "type to search", "╭", "›"} {
 		if !strings.Contains(view, want) {
 			t.Fatalf("wide view missing %q:\n%s", want, view)
 		}
@@ -258,6 +258,36 @@ func TestSearchViewShowsMatchContext(t *testing.T) {
 	}
 }
 
+func TestListShowsQuickSlotsEnvironmentAndRiskLabels(t *testing.T) {
+	store := state.NewStore()
+	store.Hosts["prod-api"] = state.HostState{Favorite: true}
+	model := newWideModel(t, []sshconfig.HostEntry{
+		{Alias: "dev-db", Group: "dev", HostName: "192.0.2.20", User: "deploy"},
+		{Alias: "prod-api", Group: "prod", HostName: "192.0.2.12", User: "root", ProxyJump: "jump-prod"},
+	}, store)
+	model, _ = model.update(tea.WindowSizeMsg{Width: 180, Height: 30})
+
+	view := stripANSI(model.View())
+	for _, want := range []string{"1   ★", "[prod]", "!root,jump", "quick 1=prod-api"} {
+		if !strings.Contains(view, want) {
+			t.Fatalf("view missing %q:\n%s", want, view)
+		}
+	}
+}
+
+func TestSettingsViewShowsDensityControl(t *testing.T) {
+	model := NewModel(Config{Entries: []sshconfig.HostEntry{{Alias: "prod-api"}}})
+	model, _ = model.update(tea.WindowSizeMsg{Width: 120, Height: 24})
+	model, _ = model.update(tea.KeyMsg{Type: tea.KeyCtrlO})
+
+	view := stripANSI(model.View())
+	for _, want := range []string{"Density", "comfortable"} {
+		if !strings.Contains(view, want) {
+			t.Fatalf("settings view missing %q:\n%s", want, view)
+		}
+	}
+}
+
 func TestBrowseViewShowsNoResultsQueryAndClearHint(t *testing.T) {
 	model := newWideModel(t, []sshconfig.HostEntry{
 		{Alias: "prod-api", Group: "prod"},
@@ -274,10 +304,10 @@ func TestBrowseViewShowsNoResultsQueryAndClearHint(t *testing.T) {
 
 func TestHelpViewDocumentsSearchClearShortcut(t *testing.T) {
 	model := NewModel(Config{})
-	model, _ = model.update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("?")})
+	model, _ = model.update(tea.KeyMsg{Type: tea.KeyCtrlL})
 
 	view := stripANSI(model.View())
-	for _, want := range []string{"/      Enter search mode and edit the current filter.", "Ctrl+U Clear the filter while search mode is active."} {
+	for _, want := range []string{"type   Start search with the typed character.", "/      Enter search mode and edit the current filter.", "Ctrl+U Clear the filter while search mode is active."} {
 		if !strings.Contains(view, want) {
 			t.Fatalf("help view missing %q:\n%s", want, view)
 		}
@@ -287,7 +317,7 @@ func TestHelpViewDocumentsSearchClearShortcut(t *testing.T) {
 func TestSettingsRendersAsOverlayOnBrowseView(t *testing.T) {
 	model := NewModel(Config{Entries: []sshconfig.HostEntry{{Alias: "prod-api", Group: "prod"}}})
 	model, _ = model.update(tea.WindowSizeMsg{Width: 120, Height: 24})
-	model, _ = model.update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("o")})
+	model, _ = model.update(tea.KeyMsg{Type: tea.KeyCtrlO})
 
 	view := stripANSI(model.View())
 	for _, want := range []string{"Settings", "Open mode", "Terminal", "ssht", "prod-api"} {
@@ -302,7 +332,7 @@ func TestFooterHintsKeepPlainTextStableWithStyledKeys(t *testing.T) {
 	model, _ = model.update(tea.WindowSizeMsg{Width: 120, Height: 18})
 
 	view := stripANSI(model.View())
-	for _, want := range []string{"Enter connect", "/ search", "Space mark", "? help"} {
+	for _, want := range []string{"type search", "Enter connect", "Ctrl+K commands", "Ctrl+O settings", "Space mark"} {
 		if !strings.Contains(view, want) {
 			t.Fatalf("footer hint missing %q:\n%s", want, view)
 		}

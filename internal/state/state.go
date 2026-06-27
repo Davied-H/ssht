@@ -26,6 +26,7 @@ type Store struct {
 type Settings struct {
 	OpenMode       string `json:"openMode,omitempty"`
 	Terminal       string `json:"terminal,omitempty"`
+	Density        string `json:"density,omitempty"`
 	PreviewVisible bool   `json:"previewVisible"`
 	ShowRawPreview bool   `json:"showRawPreview,omitempty"`
 	MonitorVisible bool   `json:"monitorVisible,omitempty"`

@@ -159,7 +159,7 @@ func parseOptions(args []string) (options, error) {
 	flags.BoolVar(&opts.Debug, "debug", false, "print parser warnings to stderr")
 	flags.StringVar(&opts.Terminal, "terminal", opts.Terminal, "terminal backend: auto, iterm, terminal, wezterm, kitty, alacritty, ghostty")
 	flags.StringVar(&opts.OpenMode, "open-mode", opts.OpenMode, "terminal open mode: auto, window, tab, split")
-	flags.BoolVar(&opts.Monitor, "monitor", false, "show the SSH monitoring panel on startup (toggle anytime with M)")
+	flags.BoolVar(&opts.Monitor, "monitor", false, "show the SSH monitoring panel on startup (toggle anytime with Ctrl+N)")
 	flags.DurationVar(&opts.MonitorTTL, "monitor-ttl", opts.MonitorTTL, "how long a monitor snapshot stays fresh")
 	flags.DurationVar(&opts.MonitorTimeout, "monitor-timeout", opts.MonitorTimeout, "hard timeout for one monitor SSH probe")
 	if err := flags.Parse(args); err != nil {
