@@ -209,10 +209,10 @@ Raycast extension 位于 `raycast/`。它会调用：
 首次使用：
 
 ```bash
-cd raycast
-npm install
-npm run dev
+./install.sh --raycast
 ```
+
+这会先安装 `ssht` CLI，再用 `npm ci` 和 Raycast CLI 注册本地扩展。完成后在 Raycast 搜索 `Search SSH Hosts`。如需持续开发调试，可进入 `raycast/` 后运行 `npm run dev`。
 
 如果 Raycast 找不到 `ssht`，先运行 `./install.sh` 或 `scripts/install-release.sh`，然后在 extension preferences 里把 `ssht Path` 设置为安装后的绝对路径。
 

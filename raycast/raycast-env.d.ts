@@ -16,7 +16,7 @@ type ExtensionPreferences = {
   "noInclude": boolean,
   /** Terminal - Terminal backend used by ssht when opening a connection. */
   "terminal": "auto" | "iterm" | "terminal" | "wezterm" | "kitty" | "alacritty" | "ghostty",
-  /** Open Mode - Whether ssht should open a new terminal tab or window. */
+  /** Open Mode - Whether ssht should use automatic iTerm split detection, a new tab, or a new window. */
   "openMode": "auto" | "tab" | "window"
 }
 

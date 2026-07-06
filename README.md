@@ -36,6 +36,12 @@ cd ssht
 ./install.sh
 ```
 
+同时注册本地 Raycast 扩展：
+
+```bash
+./install.sh --raycast
+```
+
 ## 快速使用
 
 ```bash

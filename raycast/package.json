@@ -15,7 +15,7 @@
   "commands": [
     {
       "name": "search-hosts",
-      "title": "Search SSH Hosts",
+      "title": "Ssht - Search SSH Hosts",
       "description": "Search OpenSSH config hosts and connect through ssht.",
       "mode": "view"
     }

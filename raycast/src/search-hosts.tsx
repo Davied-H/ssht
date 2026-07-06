@@ -206,7 +206,6 @@ function HostActions(props: {
         <Action
           title="Open Extension Preferences"
           icon={Icon.Gear}
-          shortcut={{ modifiers: ["cmd"], key: "," }}
           onAction={openExtensionPreferences}
         />
       </ActionPanel.Section>
@@ -226,7 +225,6 @@ function RootActions(props: { onRefresh: () => Promise<void> }) {
       <Action
         title="Open Extension Preferences"
         icon={Icon.Gear}
-        shortcut={{ modifiers: ["cmd"], key: "," }}
         onAction={openExtensionPreferences}
       />
     </ActionPanel>

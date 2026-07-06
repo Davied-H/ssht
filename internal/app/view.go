@@ -912,18 +912,22 @@ func (m Model) listHeader(width int) string {
 	if m.focus == focusList && !m.searchActive {
 		label = focusStyle.Render("HOST")
 	}
+	aliasReserve, connectionReserve := listColumnWidths(width)
 	header := "  " + dimStyle.Render("quick state") + " " + label
 	if len(m.filtered) > 0 {
 		pos := fmt.Sprintf("%d/%d", m.cursor+1, len(m.filtered))
-		right := dimStyle.Render(pos)
-		if width >= 54 {
+		if width >= 54 && connectionReserve > 0 {
 			rightLabel := "TARGET"
 			if strings.TrimSpace(m.filter) != "" {
 				rightLabel = "MATCH"
 			}
-			right = dimStyle.Render(rightLabel + "  " + pos)
+			targetCol := 2 + 3 + 3 + 1 + aliasReserve + 1
+			gap := max(targetCol-lipgloss.Width(header), 1)
+			right := dimStyle.Render(rightLabel + "  " + pos)
+			header = header + strings.Repeat(" ", gap) + right
+		} else {
+			header = layoutLeftRight(header, dimStyle.Render(pos), width)
 		}
-		header = layoutLeftRight(header, right, width)
 	}
 	if lipgloss.Width(header) > width {
 		return truncate(header, width)
@@ -948,23 +952,7 @@ func (m Model) formatListRow(i, width int, showGroup bool) string {
 		prefix = "› "
 	}
 
-	aliasReserve := 24
-	connectionReserve := 0
-	if width > 0 {
-		// total = prefix + quick cell + status cell + spaces + alias + meta.
-		base := 2 + 3 + 3 + 3
-		fluid := width - base
-		if fluid < 8 {
-			aliasReserve = max(fluid, 1)
-			connectionReserve = 0
-		} else {
-			aliasReserve = fluid * 5 / 9
-			if aliasReserve < 16 {
-				aliasReserve = 16
-			}
-			connectionReserve = fluid - aliasReserve
-		}
-	}
+	aliasReserve, connectionReserve := listColumnWidths(width)
 
 	aliasText := truncate(entry.Alias, aliasReserve)
 	alias := padRight(aliasText, aliasReserve)
@@ -986,6 +974,24 @@ func (m Model) formatListRow(i, width int, showGroup bool) string {
 		row = activeRowStyle.Render(fitPlainRow(plainActive, width))
 	}
 	return row
+}
+
+func listColumnWidths(width int) (aliasReserve, connectionReserve int) {
+	aliasReserve = 24
+	if width <= 0 {
+		return aliasReserve, 0
+	}
+	// total = prefix + quick cell + status cell + spaces + alias + meta.
+	base := 2 + 3 + 3 + 3
+	fluid := width - base
+	if fluid < 8 {
+		return max(fluid, 1), 0
+	}
+	aliasReserve = fluid * 5 / 9
+	if aliasReserve < 16 {
+		aliasReserve = 16
+	}
+	return aliasReserve, fluid - aliasReserve
 }
 
 func (m Model) quickSlotCell(entry sshconfig.HostEntry) string {
@@ -1026,6 +1032,7 @@ func (m Model) listMeta(entry sshconfig.HostEntry, connection string, showGroup 
 	if showGroup && entry.Group != "" {
 		parts = append(parts, "["+entry.Group+"]")
 	}
+	parts = append(parts, tagChips(entry.Tags)...)
 	if connection != "" {
 		parts = append(parts, connection)
 	}
@@ -1035,6 +1042,18 @@ func (m Model) listMeta(entry sshconfig.HostEntry, connection string, showGroup 
 		}
 	}
 	return strings.Join(parts, " ")
+}
+
+func tagChips(tags []string) []string {
+	chips := make([]string, 0, len(tags))
+	for _, tag := range tags {
+		tag = strings.TrimSpace(tag)
+		if tag == "" {
+			continue
+		}
+		chips = append(chips, "#"+tag)
+	}
+	return chips
 }
 
 func (m Model) quickHintLine() string {

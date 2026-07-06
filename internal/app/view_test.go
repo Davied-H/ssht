@@ -275,6 +275,50 @@ func TestListShowsQuickSlotsEnvironmentAndRiskLabels(t *testing.T) {
 	}
 }
 
+func TestListShowsHostTags(t *testing.T) {
+	model := newWideModel(t, []sshconfig.HostEntry{
+		{Alias: "prod-api", Group: "prod", Tags: []string{"api", "critical"}, HostName: "192.0.2.12", User: "deploy"},
+		{Alias: "prod-db", Group: "prod", HostName: "192.0.2.13", User: "deploy"},
+	}, state.NewStore())
+	model, _ = model.update(tea.WindowSizeMsg{Width: 180, Height: 30})
+
+	view := stripANSI(model.View())
+	for _, want := range []string{"#api", "#critical"} {
+		if !strings.Contains(view, want) {
+			t.Fatalf("list view missing tag %q:\n%s", want, view)
+		}
+	}
+	if strings.Contains(view, "prod-db") && strings.Contains(view, "prod-db #") {
+		t.Fatalf("untagged host should not render tag chips:\n%s", view)
+	}
+}
+
+func TestListHeaderTargetAlignsWithConnectionColumn(t *testing.T) {
+	model := newWideModel(t, []sshconfig.HostEntry{
+		{Alias: "prod-api", HostName: "192.0.2.12", User: "deploy"},
+	}, state.NewStore())
+	lines := model.listLines(3, 90, false)
+	if len(lines) < 2 {
+		t.Fatalf("list lines = %v, want header and row", lines)
+	}
+
+	header := stripANSI(lines[0])
+	row := stripANSI(lines[1])
+	if !strings.Contains(header, "quick state HOST") {
+		t.Fatalf("header should keep readable labels, got %q", header)
+	}
+	targetCol := strings.Index(header, "TARGET")
+	metaCol := strings.Index(row, "[prod]")
+	if targetCol < 0 || metaCol < 0 {
+		t.Fatalf("missing header target or metadata:\nheader=%q\nrow=%q", header, row)
+	}
+	targetDisplayCol := lipgloss.Width(header[:targetCol])
+	metaDisplayCol := lipgloss.Width(row[:metaCol])
+	if targetDisplayCol != metaDisplayCol {
+		t.Fatalf("TARGET column = %d, metadata column = %d\nheader=%q\nrow=%q", targetDisplayCol, metaDisplayCol, header, row)
+	}
+}
+
 func TestSettingsViewShowsDensityControl(t *testing.T) {
 	model := NewModel(Config{Entries: []sshconfig.HostEntry{{Alias: "prod-api"}}})
 	model, _ = model.update(tea.WindowSizeMsg{Width: 120, Height: 24})
