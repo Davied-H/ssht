@@ -77,7 +77,6 @@ func (m Model) previewLines(maxLines, width int) []string {
 	lines := renderPreviewHeader(entry, mstate, width, showMonitor)
 
 	if sections := renderConnectionSections(entry, hostState, width); len(sections) > 0 {
-		lines = append(lines, "")
 		lines = append(lines, sections...)
 	}
 
@@ -107,14 +106,19 @@ func (m Model) previewLines(maxLines, width int) []string {
 	return fitLines(lines, maxLines)
 }
 
-// renderPreviewHeader produces the alias / state-dot row at the very top of the
-// preview pane. Connection details are grouped below so the preview reads like a
-// deliberate pre-connect confirmation panel.
+// renderPreviewHeader produces the leading Host row in the same property layout
+// as the connection details below it.
 func renderPreviewHeader(entry sshconfig.HostEntry, state monitorState, width int, hasMonitor bool) []string {
-	bar := accentStyle.Render("▎ ")
+	labelText := mutedStyle.Render(padRight("Host", previewSectionLabelW))
+	prefix := strings.Repeat(" ", previewBarIndent) + labelText + " "
+	available := width - lipgloss.Width(prefix)
+	if available < 1 {
+		return []string{prefix}
+	}
+
 	chip := monitorStateChip(state)
 	chipW := lipgloss.Width(chip)
-	titleRoom := width - lipgloss.Width(bar)
+	titleRoom := available
 	if hasMonitor && chipW > 0 {
 		titleRoom -= chipW + 1
 	}
@@ -122,13 +126,12 @@ func renderPreviewHeader(entry sshconfig.HostEntry, state monitorState, width in
 		titleRoom = 1
 	}
 	title := brandStyle.Render(truncate(entry.Alias, titleRoom))
-	headerLeft := bar + title
 
 	var first string
 	if hasMonitor && chipW > 0 {
-		first = layoutLeftRight(headerLeft, chip, width)
+		first = prefix + layoutLeftRight(title, chip, available)
 	} else {
-		first = headerLeft
+		first = prefix + title
 	}
 
 	return []string{first}
@@ -429,11 +432,10 @@ func healthHeaderSuffix(state monitorState, age time.Duration) (string, lipgloss
 	return "", lipgloss.Style{}
 }
 
-// barInfoRow:  "  ┃ Label    value"  (single-line section row)
+// barInfoRow renders one quiet preview property row.
 func barInfoRow(label, value string, width int) string {
-	bar := accentStyle.Render("┃ ")
 	labelText := mutedStyle.Render(padRight(label, previewSectionLabelW))
-	prefix := strings.Repeat(" ", previewBarIndent) + bar + labelText + " "
+	prefix := strings.Repeat(" ", previewBarIndent) + labelText + " "
 	available := width - lipgloss.Width(prefix)
 	if available < 1 {
 		return prefix
@@ -484,11 +486,9 @@ func borderedBlock(rows []string, width int) []string {
 	return out
 }
 
-// barSectionHeader: "  ┃ Title                  suffix"  (header row that
-// introduces a multi-line section like Health/Top CPU/Raw).
+// barSectionHeader introduces a preview subsection like Health, Top CPU, or Raw.
 func barSectionHeader(title, suffix string, suffixStyle lipgloss.Style, width int) string {
-	bar := accentStyle.Render("┃ ")
-	left := strings.Repeat(" ", previewBarIndent) + bar + mutedStyle.Render(title)
+	left := strings.Repeat(" ", previewBarIndent) + mutedStyle.Render(title)
 	if suffix == "" {
 		return left
 	}

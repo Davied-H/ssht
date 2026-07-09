@@ -13,19 +13,19 @@ import (
 
 var (
 	brandStyle       = lipgloss.NewStyle().Foreground(lipgloss.Color("81")).Bold(true)
-	accentStyle      = lipgloss.NewStyle().Foreground(lipgloss.Color("67"))
-	focusStyle       = lipgloss.NewStyle().Foreground(lipgloss.Color("111")).Bold(true)
-	activeRowStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("230")).Background(lipgloss.Color("62")).Bold(true)
-	activeGroupStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("230")).Background(lipgloss.Color("60")).Bold(true)
+	accentStyle      = lipgloss.NewStyle().Foreground(lipgloss.Color("75"))
+	focusStyle       = lipgloss.NewStyle().Foreground(lipgloss.Color("153")).Bold(true)
+	activeRowStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("255")).Background(lipgloss.Color("238"))
+	activeGroupStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("255")).Background(lipgloss.Color("238"))
 	successStyle     = lipgloss.NewStyle().Foreground(lipgloss.Color("78"))
 	warningStyle     = lipgloss.NewStyle().Foreground(lipgloss.Color("179"))
 	errorStyle       = lipgloss.NewStyle().Foreground(lipgloss.Color("203"))
 	infoStyle        = lipgloss.NewStyle().Foreground(lipgloss.Color("109"))
-	mutedStyle       = lipgloss.NewStyle().Foreground(lipgloss.Color("244"))
-	dimStyle         = lipgloss.NewStyle().Foreground(lipgloss.Color("239"))
-	panelBorder      = lipgloss.NewStyle().Foreground(lipgloss.Color("238"))
-	focusBorder      = lipgloss.NewStyle().Foreground(lipgloss.Color("81"))
-	statusBarStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("252")).Background(lipgloss.Color("235")).Bold(true)
+	mutedStyle       = lipgloss.NewStyle().Foreground(lipgloss.Color("245"))
+	dimStyle         = lipgloss.NewStyle().Foreground(lipgloss.Color("241"))
+	panelBorder      = lipgloss.NewStyle().Foreground(lipgloss.Color("239"))
+	focusBorder      = lipgloss.NewStyle().Foreground(lipgloss.Color("244"))
+	statusBarStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("252")).Background(lipgloss.Color("235"))
 	filterBarStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("245")).Background(lipgloss.Color("234"))
 	commandBar       = lipgloss.NewStyle().Foreground(lipgloss.Color("246")).Background(lipgloss.Color("235"))
 
@@ -420,10 +420,8 @@ func (m Model) browseView() string {
 }
 
 func (m Model) browseLines(maxHeight int) []string {
-	lines := []string{
-		m.topStatusLine(),
-		m.filterLine(),
-	}
+	lines := []string{m.topStatusLine()}
+	lines = append(lines, m.filterBoxLines()...)
 
 	bodyHeight := remainingLines(maxHeight, len(lines))
 	if bodyHeight <= 0 {
@@ -431,14 +429,26 @@ func (m Model) browseLines(maxHeight int) []string {
 	}
 
 	if len(m.entries) == 0 {
-		return append(lines, "  "+mutedStyle.Render("No SSH Host entries found. Check "+m.configPath))
+		return append(lines, emptyStateLines(
+			"No hosts found",
+			"ssht did not find concrete Host entries in the configured OpenSSH config.",
+			"Check "+displayConfigPath(m.configPath)+" or press Ctrl+R after editing your config.",
+		)...)
 	}
 	if len(m.filtered) == 0 {
 		query := strings.TrimSpace(m.filter)
 		if query == "" {
-			return append(lines, "  "+mutedStyle.Render("No hosts match the current filter."))
+			return append(lines, emptyStateLines(
+				"No hosts in this group",
+				"Switch groups with ←/→ or Tab into the sidebar to pick another group.",
+				"Press Ctrl+A to add a host.",
+			)...)
 		}
-		return append(lines, "  "+mutedStyle.Render(fmt.Sprintf("No hosts match %q. Press Ctrl+U in search to clear.", query)))
+		return append(lines, emptyStateLines(
+			"No matches",
+			fmt.Sprintf("No hosts match %q in the current scope.", query),
+			"Press Ctrl+U in search to clear, or try alias:, user:, group:, tag:, fav:.",
+		)...)
 	}
 
 	sidebarWidth, listWidth, previewWidth := m.splitThreeColumns()
@@ -600,14 +610,95 @@ func (m Model) filterLine() string {
 	}
 	prompt := infoStyle.Render(" Filter ")
 	if m.filter == "" {
-		hint := "type to search · / edit · user:deploy · group:prod · -db · tag:<name>"
-		if quick := m.quickHintLine(); quick != "" {
-			hint = "quick " + quick + " · " + hint
-		}
+		hint := "type to search · / edit · tag:api user:deploy group:prod -db"
 		return fillLine(filterBarStyle.Render(" "+prompt+mutedStyle.Render(hint)+" "), m.width)
 	}
 	summary := fmt.Sprintf("  %d/%d matches", len(m.filtered), len(m.entries))
 	return fillLine(filterBarStyle.Render(" "+prompt+m.filter+dimStyle.Render(summary+" · type to edit · Ctrl+U clear in search")+" "), m.width)
+}
+
+func (m Model) filterBoxLines() []string {
+	if m.width > 0 && m.width < 24 {
+		return []string{m.filterLine()}
+	}
+	width := m.width
+	if width <= 0 {
+		width = 80
+	}
+	innerW := width - 2
+	if innerW < 1 {
+		return []string{m.filterLine()}
+	}
+	border := panelBorder
+	title := " Search "
+	if m.searchActive {
+		border = focusBorder
+	}
+	titleW := lipgloss.Width(title)
+	if titleW > innerW {
+		title = ansi.Truncate(title, innerW, "…")
+		titleW = lipgloss.Width(title)
+	}
+	top := border.Render("╭") + titleStyle.Render(title) + border.Render(strings.Repeat("─", innerW-titleW)+"╮")
+	middle := border.Render("│") + fitColumnWidth(m.searchBoxContent(innerW), innerW, strings.Repeat(" ", innerW)) + border.Render("│")
+	bottom := border.Render("╰" + strings.Repeat("─", innerW) + "╯")
+	return []string{top, middle, bottom}
+}
+
+func (m Model) searchBoxContent(width int) string {
+	label := mutedStyle.Render("Filter")
+	value := strings.TrimSpace(m.filter)
+	if m.searchActive {
+		label = ""
+		if value == "" {
+			value = mutedStyle.Render("tag:api user:deploy group:prod -db")
+		}
+		value += focusStyle.Render("▏")
+	} else if value == "" {
+		value = mutedStyle.Render("type to search   / edit   tag:api user:deploy group:prod -db")
+	}
+
+	left := " "
+	if label != "" {
+		left += label + "  "
+	}
+	left += value
+	right := dimStyle.Render(m.searchBoxSummary())
+	if lipgloss.Width(right) == 0 {
+		return left
+	}
+	return layoutLeftRight(left, right, width)
+}
+
+func (m Model) searchBoxSummary() string {
+	if m.searchActive {
+		summary := fmt.Sprintf("%d/%d hosts", len(m.filtered), len(m.entries))
+		if group := m.selectedGroup(); group != "" && group != "all" {
+			summary += " · " + group
+		}
+		return summary + " · Enter apply · Esc close · Ctrl+U clear"
+	}
+	if strings.TrimSpace(m.filter) != "" {
+		return fmt.Sprintf("%d/%d matches · type to edit · Ctrl+U clear in search", len(m.filtered), len(m.entries))
+	}
+	return fmt.Sprintf("%d hosts", len(m.entries))
+}
+
+func emptyStateLines(title, body, action string) []string {
+	return []string{
+		"",
+		"  " + titleStyle.Render(title),
+		"  " + mutedStyle.Render(body),
+		"  " + infoStyle.Render(action),
+	}
+}
+
+func displayConfigPath(configPath string) string {
+	configPath = strings.TrimSpace(configPath)
+	if configPath == "" {
+		return "~/.ssh/config"
+	}
+	return configPath
 }
 
 func (m Model) splitColumns() (left, right int) {
@@ -913,7 +1004,7 @@ func (m Model) listHeader(width int) string {
 		label = focusStyle.Render("HOST")
 	}
 	aliasReserve, connectionReserve := listColumnWidths(width)
-	header := "  " + dimStyle.Render("quick state") + " " + label
+	header := "  " + dimStyle.Render("key flags") + " " + label
 	if len(m.filtered) > 0 {
 		pos := fmt.Sprintf("%d/%d", m.cursor+1, len(m.filtered))
 		if width >= 54 && connectionReserve > 0 {
@@ -1019,7 +1110,7 @@ func entryMarkerPlain(m Model, entry sshconfig.HostEntry) string {
 		markers[1] = '★'
 	}
 	if hostState.LastConnectedAt != "" {
-		markers[2] = '●'
+		markers[2] = '·'
 	}
 	return string(markers)
 }
@@ -1032,7 +1123,7 @@ func (m Model) listMeta(entry sshconfig.HostEntry, connection string, showGroup 
 	if showGroup && entry.Group != "" {
 		parts = append(parts, "["+entry.Group+"]")
 	}
-	parts = append(parts, tagChips(entry.Tags)...)
+	parts = append(parts, compactTagChips(entry.Tags, 2)...)
 	if connection != "" {
 		parts = append(parts, connection)
 	}
@@ -1042,6 +1133,17 @@ func (m Model) listMeta(entry sshconfig.HostEntry, connection string, showGroup 
 		}
 	}
 	return strings.Join(parts, " ")
+}
+
+func compactTagChips(tags []string, limit int) []string {
+	if limit <= 0 {
+		return nil
+	}
+	chips := tagChips(tags)
+	if len(chips) <= limit {
+		return chips
+	}
+	return append(chips[:limit], fmt.Sprintf("+%d tags", len(chips)-limit))
 }
 
 func tagChips(tags []string) []string {
@@ -1366,7 +1468,7 @@ func (m Model) entryMarkerCell(entry sshconfig.HostEntry) string {
 		markers[1] = '★'
 	}
 	if hostState.LastConnectedAt != "" {
-		markers[2] = '●'
+		markers[2] = '·'
 	}
 	rendered := make([]string, 0, len(markers))
 	for i, marker := range markers {
@@ -1379,7 +1481,7 @@ func (m Model) entryMarkerCell(entry sshconfig.HostEntry) string {
 		case i == 1:
 			rendered = append(rendered, warnStyle.Render(cell))
 		default:
-			rendered = append(rendered, liveStyle.Render(cell))
+			rendered = append(rendered, dimStyle.Render(cell))
 		}
 	}
 	return strings.Join(rendered, "")

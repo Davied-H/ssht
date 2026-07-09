@@ -136,7 +136,7 @@ func TestPreviewShowsConnectionConfirmationSections(t *testing.T) {
 	model, _ = model.update(tea.WindowSizeMsg{Width: 180, Height: 30})
 
 	view := stripANSI(model.View())
-	for _, want := range []string{"┃ Target", "┃ Group", "┃ Tags", "┃ Auth", "┃ Route", "┃ Source", "┃ Risk", "root login", "public ip", "production", "routed connection"} {
+	for _, want := range []string{"Host", "prod-api", "Target", "Group", "Tags", "Auth", "Route", "Source", "Risk", "root login", "public ip", "production", "routed connection"} {
 		if !strings.Contains(view, want) {
 			t.Fatalf("preview missing %q:\n%s", want, view)
 		}
@@ -221,7 +221,7 @@ func TestBrowseViewRendersProfessionalStructureOnWideTerminal(t *testing.T) {
 	model := newWideModel(t, entries, state.NewStore())
 
 	view := model.View()
-	for _, want := range []string{"Groups", "state HOST", "type to search", "╭", "›"} {
+	for _, want := range []string{"Groups", "flags HOST", "type to search", "╭", "›"} {
 		if !strings.Contains(view, want) {
 			t.Fatalf("wide view missing %q:\n%s", want, view)
 		}
@@ -235,10 +235,13 @@ func TestSearchViewShowsEditAndClearHints(t *testing.T) {
 	model = typeSearch(model, "prod")
 
 	view := stripANSI(model.View())
-	for _, want := range []string{"SEARCH prod", "1/1 hosts", "Enter apply", "Esc close", "Ctrl+U clear"} {
+	for _, want := range []string{"╭ Search", "prod", "1/1 hosts", "Enter apply", "Esc close", "Ctrl+U clear", "╰"} {
 		if !strings.Contains(view, want) {
 			t.Fatalf("search view missing %q:\n%s", want, view)
 		}
+	}
+	if strings.Contains(view, "Search active") {
+		t.Fatalf("search view should not render active title:\n%s", view)
 	}
 }
 
@@ -268,7 +271,7 @@ func TestListShowsQuickSlotsEnvironmentAndRiskLabels(t *testing.T) {
 	model, _ = model.update(tea.WindowSizeMsg{Width: 180, Height: 30})
 
 	view := stripANSI(model.View())
-	for _, want := range []string{"1   ★", "[prod]", "!root,jump", "quick 1=prod-api"} {
+	for _, want := range []string{"1   ★", "[prod]", "!root,jump"} {
 		if !strings.Contains(view, want) {
 			t.Fatalf("view missing %q:\n%s", want, view)
 		}
@@ -304,7 +307,7 @@ func TestListHeaderTargetAlignsWithConnectionColumn(t *testing.T) {
 
 	header := stripANSI(lines[0])
 	row := stripANSI(lines[1])
-	if !strings.Contains(header, "quick state HOST") {
+	if !strings.Contains(header, "key flags HOST") {
 		t.Fatalf("header should keep readable labels, got %q", header)
 	}
 	targetCol := strings.Index(header, "TARGET")

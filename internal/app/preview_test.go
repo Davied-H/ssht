@@ -83,12 +83,12 @@ func TestPreviewLiveSnapshotCollapsed(t *testing.T) {
 	rendered := joinPreview(previewModel(t, snap, false, 140, 30))
 
 	wants := []string{
-		"▎ demo-api",
+		"demo-api",
 		"● live",
 		"demo@192.0.2.12:22",
 		"~/.ssh/demo-api.pem",
-		"┃ Source",
-		"┃ Health",
+		"Source",
+		"Health",
 		"updated",
 		"uptime",
 		"140d",
@@ -102,7 +102,7 @@ func TestPreviewLiveSnapshotCollapsed(t *testing.T) {
 		"17G/61G",
 		"conns",
 		"1 established",
-		"┃ Top CPU",
+		"Top CPU",
 		"13.8%",
 		"systemd",
 		"+4",
@@ -167,7 +167,7 @@ func TestPreviewExpandedShowsAllProcsAndRaw(t *testing.T) {
 	if strings.Contains(rendered, "+4") {
 		t.Errorf("expanded preview should not show +4 chip:\n%s", rendered)
 	}
-	if !strings.Contains(rendered, "┃ Raw config") {
+	if !strings.Contains(rendered, "Raw config") {
 		t.Errorf("expanded preview should include Raw config section:\n%s", rendered)
 	}
 	if !strings.Contains(rendered, "Host demo-api") {
