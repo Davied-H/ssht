@@ -15,7 +15,7 @@ type ExtensionPreferences = {
   /** Disable Include Parsing - Ignore Include directives while listing hosts. */
   "noInclude": boolean,
   /** Terminal - Terminal backend used by ssht when opening a connection. */
-  "terminal": "auto" | "iterm" | "terminal" | "wezterm" | "kitty" | "alacritty" | "ghostty",
+  "terminal": "auto" | "iterm" | "terminal" | "wezterm" | "kitty" | "alacritty" | "ghostty" | "warp",
   /** Open Mode - Whether ssht should use automatic iTerm split detection, a new tab, or a new window. */
   "openMode": "auto" | "tab" | "window"
 }

@@ -1289,7 +1289,7 @@ func settingOpenModes() []string {
 }
 
 func settingTerminals() []string {
-	return []string{"auto", "iterm", "terminal", "wezterm", "kitty", "alacritty", "ghostty"}
+	return []string{"auto", "iterm", "terminal", "wezterm", "kitty", "alacritty", "ghostty", "warp"}
 }
 
 func settingDensities() []string {

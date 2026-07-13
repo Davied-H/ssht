@@ -82,6 +82,10 @@
         {
           "title": "Ghostty",
           "value": "ghostty"
+        },
+        {
+          "title": "Warp",
+          "value": "warp"
         }
       ]
     },

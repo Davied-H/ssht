@@ -82,8 +82,9 @@ if ! osascript -e 'id of application "iTerm"' >/dev/null 2>&1 \
   && ! command -v wezterm >/dev/null 2>&1 \
   && ! command -v kitty >/dev/null 2>&1 \
   && ! command -v alacritty >/dev/null 2>&1 \
-  && ! command -v ghostty >/dev/null 2>&1; then
-  echo "Note: no supported terminal was found. $BIN_NAME can list hosts, but connecting needs iTerm2, Terminal.app, WezTerm, kitty, Alacritty, or Ghostty."
+  && ! command -v ghostty >/dev/null 2>&1 \
+  && ! osascript -e 'id of application "Warp"' >/dev/null 2>&1; then
+  echo "Note: no supported terminal was found. $BIN_NAME can list hosts, but connecting needs iTerm2, Terminal.app, WezTerm, kitty, Alacritty, Ghostty, or Warp."
 fi
 
 if [ "$INSTALL_RAYCAST" -eq 1 ]; then

@@ -1,6 +1,7 @@
 package terminal
 
 import (
+	"os"
 	"reflect"
 	"strings"
 	"testing"
@@ -17,6 +18,36 @@ func TestAutoDetectSelectsFirstAvailableBackend(t *testing.T) {
 	}
 	if got, want := manager.BackendName(), "Terminal.app"; got != want {
 		t.Fatalf("backend = %q, want %q", got, want)
+	}
+}
+
+func TestExecRunnerWritesAndRemovesPrivateTempScript(t *testing.T) {
+	t.Setenv("TMPDIR", t.TempDir())
+	runner := ExecRunner{}
+
+	path, err := runner.WriteTempScript("#!/bin/sh\nexit 0\n")
+	if err != nil {
+		t.Fatalf("WriteTempScript returned error: %v", err)
+	}
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatalf("stat temp script: %v", err)
+	}
+	if got, want := info.Mode().Perm(), os.FileMode(0o700); got != want {
+		t.Fatalf("permissions = %o, want %o", got, want)
+	}
+	contents, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read temp script: %v", err)
+	}
+	if got, want := string(contents), "#!/bin/sh\nexit 0\n"; got != want {
+		t.Fatalf("contents = %q, want %q", got, want)
+	}
+	if err := runner.Remove(path); err != nil {
+		t.Fatalf("remove temp script: %v", err)
+	}
+	if _, err := os.Stat(path); !os.IsNotExist(err) {
+		t.Fatalf("temp script still exists or stat returned unexpected error: %v", err)
 	}
 }
 
@@ -54,6 +85,25 @@ func TestAutoDetectPrefersCurrentWezTerm(t *testing.T) {
 		t.Fatalf("calls = %#v, want %#v", runner.calls, want)
 	}
 	if got, want := manager.BackendName(), "WezTerm"; got != want {
+		t.Fatalf("backend = %q, want %q", got, want)
+	}
+}
+
+func TestAutoDetectPrefersCurrentWarp(t *testing.T) {
+	runner := &recordingRunner{}
+	manager := Manager{Runner: runner, Env: mapEnv("TERM_PROGRAM", "WarpTerminal")}
+
+	if err := manager.CheckAvailable(); err != nil {
+		t.Fatalf("CheckAvailable returned error: %v", err)
+	}
+
+	want := [][]string{
+		{"output", "osascript", "-e", `id of application "Warp"`},
+	}
+	if !reflect.DeepEqual(runner.calls, want) {
+		t.Fatalf("calls = %#v, want %#v", runner.calls, want)
+	}
+	if got, want := manager.BackendName(), "Warp"; got != want {
 		t.Fatalf("backend = %q, want %q", got, want)
 	}
 }
@@ -473,6 +523,112 @@ func TestWezTermTabUsesNewTabFlag(t *testing.T) {
 	}
 }
 
+func TestWarpTabRunsSelfRemovingCommandScript(t *testing.T) {
+	runner := &recordingRunner{}
+	manager := Manager{Runner: runner, Preference: "warp", OpenMode: OpenModeTab}
+
+	if err := manager.Connect("prod-api"); err != nil {
+		t.Fatalf("Connect returned error: %v", err)
+	}
+
+	want := [][]string{
+		{"output", "osascript", "-e", `id of application "Warp"`},
+		{"run", "open", "-a", "Warp", "/tmp/ssht-warp"},
+	}
+	if !reflect.DeepEqual(runner.calls, want) {
+		t.Fatalf("calls = %#v, want %#v", runner.calls, want)
+	}
+	if got, want := runner.scriptContents, []string{"#!/bin/sh\nrm -f -- \"$0\"\nexec env -u LC_ALL ssh 'prod-api'\n"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("script contents = %#v, want %#v", got, want)
+	}
+	if got, want := manager.OpenModeName(), "tab"; got != want {
+		t.Fatalf("open mode name = %q, want %q", got, want)
+	}
+}
+
+func TestWarpWindowStartsNewAppInstance(t *testing.T) {
+	runner := &recordingRunner{}
+	manager := Manager{Runner: runner, Preference: "warp", OpenMode: OpenModeWindow}
+
+	if err := manager.Connect("prod-api"); err != nil {
+		t.Fatalf("Connect returned error: %v", err)
+	}
+
+	want := [][]string{
+		{"output", "osascript", "-e", `id of application "Warp"`},
+		{"run", "open", "-n", "-a", "Warp", "/tmp/ssht-warp"},
+	}
+	if !reflect.DeepEqual(runner.calls, want) {
+		t.Fatalf("calls = %#v, want %#v", runner.calls, want)
+	}
+	if got, want := manager.OpenModeName(), "window"; got != want {
+		t.Fatalf("open mode name = %q, want %q", got, want)
+	}
+}
+
+func TestWarpSplitCreatesPaneAndRunsPrivateScript(t *testing.T) {
+	runner := &recordingRunner{}
+	manager := Manager{Runner: runner, Preference: "warp", OpenMode: OpenModeSplit}
+
+	if err := manager.Connect(Target{Alias: "prod-api", SSHPassword: "example-password"}); err != nil {
+		t.Fatalf("Connect returned error: %v", err)
+	}
+
+	want := [][]string{
+		{"output", "osascript", "-e", `id of application "Warp"`},
+		{"run", "osascript",
+			"-e", `tell application "Warp" to activate`,
+			"-e", "delay 0.2",
+			"-e", `tell application "System Events"`,
+			"-e", `tell process "Warp"`,
+			"-e", "set frontmost to true",
+			"-e", `keystroke "d" using command down`,
+			"-e", "delay 0.5",
+			"-e", `keystroke "'/tmp/ssht-warp'"`,
+			"-e", "delay 0.3",
+			"-e", "key code 36",
+			"-e", "end tell",
+			"-e", "end tell"},
+	}
+	if !reflect.DeepEqual(runner.calls, want) {
+		t.Fatalf("calls = %#v, want %#v", runner.calls, want)
+	}
+	if got, want := runner.scriptContents, []string{"#!/bin/sh\nrm -f -- \"$0\"\nexec env -u LC_ALL sshpass -p 'example-password' ssh 'prod-api'\n"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("script contents = %#v, want %#v", got, want)
+	}
+	if got, want := manager.OpenModeName(), "split"; got != want {
+		t.Fatalf("open mode name = %q, want %q", got, want)
+	}
+}
+
+func TestWarpRemovesScriptWhenOpenFails(t *testing.T) {
+	runner := &recordingRunner{runErr: errRecordingRun}
+	manager := Manager{Runner: runner, Preference: "warp", OpenMode: OpenModeTab}
+
+	if err := manager.Connect("prod-api"); err == nil {
+		t.Fatal("expected Connect to return the open error")
+	}
+	if got, want := runner.removedPaths, []string{"/tmp/ssht-warp"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("removed paths = %#v, want %#v", got, want)
+	}
+}
+
+func TestWarpRemovesScriptWhenSplitAutomationFails(t *testing.T) {
+	runner := &recordingRunner{runErr: errRecordingRun}
+	manager := Manager{Runner: runner, Preference: "warp", OpenMode: OpenModeSplit}
+
+	err := manager.Connect("prod-api")
+	if err == nil {
+		t.Fatal("expected Connect to return the accessibility error")
+	}
+	if !strings.Contains(err.Error(), "Accessibility") {
+		t.Fatalf("error = %q, want accessibility guidance", err)
+	}
+	if got, want := runner.removedPaths, []string{"/tmp/ssht-warp"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("removed paths = %#v, want %#v", got, want)
+	}
+}
+
 func TestKittyTabUsesRemoteControlLaunch(t *testing.T) {
 	runner := &recordingRunner{}
 	manager := Manager{Runner: runner, Preference: "kitty", OpenMode: OpenModeTab}
@@ -585,7 +741,7 @@ func TestUnavailableBackendsReturnSupportedList(t *testing.T) {
 		t.Fatal("expected error")
 	}
 	got := err.Error()
-	for _, want := range []string{"iTerm2", "Terminal.app", "WezTerm", "kitty", "Alacritty", "Ghostty"} {
+	for _, want := range []string{"iTerm2", "Terminal.app", "WezTerm", "kitty", "Alacritty", "Ghostty", "Warp"} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("error %q does not contain %q", got, want)
 		}
@@ -607,12 +763,15 @@ type recordingRunner struct {
 	outputs        map[string][]byte
 	failOutputs    map[string]bool
 	failAllOutputs bool
+	scriptContents []string
+	removedPaths   []string
+	runErr         error
 }
 
 func (r *recordingRunner) Run(name string, args ...string) error {
 	call := append([]string{"run", name}, args...)
 	r.calls = append(r.calls, call)
-	return nil
+	return r.runErr
 }
 
 func (r *recordingRunner) Output(name string, args ...string) ([]byte, error) {
@@ -630,7 +789,18 @@ func (r *recordingRunner) Output(name string, args ...string) ([]byte, error) {
 	return []byte("1\n"), nil
 }
 
+func (r *recordingRunner) WriteTempScript(content string) (string, error) {
+	r.scriptContents = append(r.scriptContents, content)
+	return "/tmp/ssht-warp", nil
+}
+
+func (r *recordingRunner) Remove(path string) error {
+	r.removedPaths = append(r.removedPaths, path)
+	return nil
+}
+
 var errRecordingOutput = &recordingError{}
+var errRecordingRun = &recordingError{}
 
 type recordingError struct{}
 

@@ -157,7 +157,7 @@ func parseOptions(args []string) (options, error) {
 	flags.BoolVar(&opts.Doctor, "doctor", opts.Doctor, "run SSH config health checks and exit")
 	flags.StringVar(&opts.ConnectHost, "connect", "", "open an SSH connection for the given Host alias without starting the TUI")
 	flags.BoolVar(&opts.Debug, "debug", false, "print parser warnings to stderr")
-	flags.StringVar(&opts.Terminal, "terminal", opts.Terminal, "terminal backend: auto, iterm, terminal, wezterm, kitty, alacritty, ghostty")
+	flags.StringVar(&opts.Terminal, "terminal", opts.Terminal, "terminal backend: auto, iterm, terminal, wezterm, kitty, alacritty, ghostty, warp")
 	flags.StringVar(&opts.OpenMode, "open-mode", opts.OpenMode, "terminal open mode: auto, window, tab, split")
 	flags.BoolVar(&opts.Monitor, "monitor", false, "show the SSH monitoring panel on startup (toggle anytime with Ctrl+N)")
 	flags.DurationVar(&opts.MonitorTTL, "monitor-ttl", opts.MonitorTTL, "how long a monitor snapshot stays fresh")
@@ -175,7 +175,7 @@ func parseOptions(args []string) (options, error) {
 		opts.Terminal = "auto"
 	}
 	if !validTerminalPreference(opts.Terminal) {
-		return options{}, errors.New("unsupported terminal " + opts.Terminal + "; supported terminals: auto, iterm, terminal, wezterm, kitty, alacritty, ghostty")
+		return options{}, errors.New("unsupported terminal " + opts.Terminal + "; supported terminals: auto, iterm, terminal, wezterm, kitty, alacritty, ghostty, warp")
 	}
 	opts.OpenMode = strings.ToLower(strings.TrimSpace(opts.OpenMode))
 	if opts.OpenMode == "" {
@@ -244,7 +244,7 @@ func openModeDefault() string {
 
 func validTerminalPreference(value string) bool {
 	switch value {
-	case "auto", "iterm", "terminal", "wezterm", "kitty", "alacritty", "ghostty":
+	case "auto", "iterm", "terminal", "wezterm", "kitty", "alacritty", "ghostty", "warp":
 		return true
 	default:
 		return false

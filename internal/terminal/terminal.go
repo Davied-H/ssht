@@ -13,6 +13,13 @@ type Runner interface {
 	Output(name string, args ...string) ([]byte, error)
 }
 
+// TempScriptRunner is required only by terminal backends that open scripts as files.
+type TempScriptRunner interface {
+	Runner
+	WriteTempScript(content string) (string, error)
+	Remove(path string) error
+}
+
 type ExecRunner struct{}
 
 func (ExecRunner) Run(name string, args ...string) error {
@@ -21,6 +28,33 @@ func (ExecRunner) Run(name string, args ...string) error {
 
 func (ExecRunner) Output(name string, args ...string) ([]byte, error) {
 	return exec.Command(name, args...).CombinedOutput()
+}
+
+func (ExecRunner) WriteTempScript(content string) (string, error) {
+	file, err := os.CreateTemp("", "ssht-warp-*")
+	if err != nil {
+		return "", err
+	}
+	path := file.Name()
+	if _, err := file.WriteString(content); err != nil {
+		_ = file.Close()
+		_ = os.Remove(path)
+		return "", err
+	}
+	if err := file.Chmod(0o700); err != nil {
+		_ = file.Close()
+		_ = os.Remove(path)
+		return "", err
+	}
+	if err := file.Close(); err != nil {
+		_ = os.Remove(path)
+		return "", err
+	}
+	return path, nil
+}
+
+func (ExecRunner) Remove(path string) error {
+	return os.Remove(path)
 }
 
 type Manager struct {
@@ -240,6 +274,7 @@ func defaultBackends() []Backend {
 		tabbedCLIBackend("kitty", "kitty", "kitty", []string{"--detach"}, []string{"@", "launch", "--type=tab"}),
 		windowOnlyCLIBackend("alacritty", "Alacritty", "alacritty", "-e"),
 		ghosttyBackend(),
+		warpBackend(),
 	}
 }
 
@@ -278,6 +313,8 @@ func currentTerminalBackendID(env EnvLookup) string {
 		return "wezterm"
 	case "ghostty":
 		return "ghostty"
+	case "warpterminal":
+		return "warp"
 	}
 	if env("KITTY_WINDOW_ID") != "" {
 		return "kitty"
@@ -373,6 +410,40 @@ func ghosttyBackend() Backend {
 	}
 }
 
+func warpBackend() Backend {
+	return Backend{
+		ID:       "warp",
+		Name:     "Warp",
+		Check:    appCheck("Warp"),
+		Supports: supportsWarpModes,
+		Connect: func(runner Runner, mode OpenMode, target Target, env EnvLookup) (OpenMode, error) {
+			if mode == OpenModeSplit {
+				return connectWarpSplit(runner, target)
+			}
+			scriptRunner, ok := runner.(TempScriptRunner)
+			if !ok {
+				return "", fmt.Errorf("Warp launcher cannot create a temporary command script")
+			}
+			path, err := scriptRunner.WriteTempScript(warpCommandScript(sshCommand(target)))
+			if err != nil {
+				return "", fmt.Errorf("create Warp command script: %w", err)
+			}
+
+			args := []string{"-a", "Warp", path}
+			actualMode := OpenModeTab
+			if mode == OpenModeWindow {
+				args = []string{"-n", "-a", "Warp", path}
+				actualMode = OpenModeWindow
+			}
+			if err := runner.Run("open", args...); err != nil {
+				_ = scriptRunner.Remove(path)
+				return "", err
+			}
+			return actualMode, nil
+		},
+	}
+}
+
 func findBackend(backends []Backend, id string) (Backend, bool) {
 	for _, backend := range backends {
 		if backend.ID == id {
@@ -452,6 +523,46 @@ func connectGhosttyTab(runner Runner, target Target) (OpenMode, error) {
 		"-e", operation,
 		"-e", "end tell",
 	)
+}
+
+func warpCommandScript(command string) string {
+	return "#!/bin/sh\nrm -f -- \"$0\"\nexec " + command + "\n"
+}
+
+func supportsWarpModes(mode OpenMode) bool {
+	return supportsWindowAndTab(mode) || mode == OpenModeSplit
+}
+
+func connectWarpSplit(runner Runner, target Target) (OpenMode, error) {
+	scriptRunner, ok := runner.(TempScriptRunner)
+	if !ok {
+		return "", fmt.Errorf("Warp launcher cannot create a temporary command script")
+	}
+	path, err := scriptRunner.WriteTempScript(warpCommandScript(sshCommand(target)))
+	if err != nil {
+		return "", fmt.Errorf("create Warp command script: %w", err)
+	}
+
+	err = runner.Run("osascript",
+		"-e", `tell application "Warp" to activate`,
+		"-e", "delay 0.2",
+		"-e", `tell application "System Events"`,
+		"-e", `tell process "Warp"`,
+		"-e", "set frontmost to true",
+		"-e", `keystroke "d" using command down`,
+		"-e", "delay 0.5",
+		"-e", `keystroke `+appleScriptString(shellQuote(path)),
+		// Warp processes synthetic text input asynchronously before it accepts Return.
+		"-e", "delay 0.3",
+		"-e", "key code 36",
+		"-e", "end tell",
+		"-e", "end tell",
+	)
+	if err != nil {
+		_ = scriptRunner.Remove(path)
+		return "", fmt.Errorf("Warp split failed; allow the calling app to control your computer in macOS Privacy & Security > Accessibility: %w", err)
+	}
+	return OpenModeSplit, nil
 }
 
 func isITermSession(env EnvLookup) bool {

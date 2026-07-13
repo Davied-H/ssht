@@ -90,7 +90,7 @@ Important behavior:
 - `--connect <alias>` skips the TUI and opens the selected alias through the configured terminal.
 - `--no-include` disables recursive `Include` parsing.
 - `--debug` prints parse warnings to stderr.
-- `--terminal` supports `auto`, `iterm`, `terminal`, `wezterm`, `kitty`, `alacritty`, and `ghostty`.
+- `--terminal` supports `auto`, `iterm`, `terminal`, `wezterm`, `kitty`, `alacritty`, `ghostty`, and `warp`.
 - `--open-mode` supports `auto`, `window`, `tab`, and `split`.
 
 ## Diagnose Problems
@@ -123,7 +123,7 @@ ssht --terminal auto --open-mode auto --connect demo-api
 ssht --terminal iterm --open-mode split --connect demo-api
 ```
 
-Use `split` only where supported. iTerm2 split behavior depends on the current iTerm2 session.
+Use `split` only where supported. iTerm2 split behavior depends on the current iTerm2 session; Warp split requires macOS Accessibility permission for the calling app.
 
 ## Groups And Tags
 

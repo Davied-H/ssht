@@ -62,6 +62,19 @@ func TestParseOptionsRejectsInvalidTerminal(t *testing.T) {
 	}
 }
 
+func TestParseOptionsAcceptsWarpTerminal(t *testing.T) {
+	t.Setenv("SSHT_TERMINAL", "")
+	t.Setenv("SSHT_OPEN_MODE", "")
+
+	options, err := parseOptions([]string{"--terminal", "warp"})
+	if err != nil {
+		t.Fatalf("parseOptions returned error: %v", err)
+	}
+	if options.Terminal != "warp" {
+		t.Fatalf("terminal = %q, want warp", options.Terminal)
+	}
+}
+
 func TestParseOptionsUsesOpenModeEnvironment(t *testing.T) {
 	t.Setenv("SSHT_TERMINAL", "")
 	t.Setenv("SSHT_OPEN_MODE", "auto")

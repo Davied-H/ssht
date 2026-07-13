@@ -46,7 +46,7 @@ ssht --connect prod-api-01
 - `--connect <alias>`：跳过 TUI，直接打开指定 Host。
 - `--no-include`：禁用 `Include` 递归解析。
 - `--debug`：把解析 warning 输出到 stderr。
-- `--terminal`：选择终端后端，支持 `auto`、`iterm`、`terminal`、`wezterm`、`kitty`、`alacritty`、`ghostty`。`auto` 会优先使用当前运行 `ssht` 的终端。
+- `--terminal`：选择终端后端，支持 `auto`、`iterm`、`terminal`、`wezterm`、`kitty`、`alacritty`、`ghostty`、`warp`。`auto` 会优先使用当前运行 `ssht` 的终端。
 - `--open-mode`：选择打开方式，支持 `auto`、`window`、`tab`、`split`。
 - `--monitor`：启动时显示 SSH 监控面板。
 
@@ -190,8 +190,9 @@ TUI 设置只影响交互界面启动后的行为；`ssht --connect` 仍只受�
 4. kitty
 5. Alacritty
 6. Ghostty
+7. Warp
 
-`--open-mode auto` 在 iTerm2 会话内会使用右侧分屏；不在 iTerm2 会话内时按新 tab 行为打开。显式指定 `split` 时只支持 iTerm2 当前会话分屏；不支持 split 的终端会报错。显式指定 `tab` 或 `window` 后不会自动切换语义。
+`--open-mode auto` 在 iTerm2 会话内会使用右侧分屏；不在 iTerm2 会话内时按新 tab 行为打开。Warp 支持 `auto`、`tab`、`window` 和 `split`；`split` 会激活 Warp、使用 `Cmd+D` 创建右侧 pane，并在新 pane 执行权限为 `0700` 且会自行删除的临时脚本。首次使用时，macOS 会请求“辅助功能”授权。显式指定 `tab` 或 `window` 后不会自动切换语义。
 
 如果 `Host` 前紧挨着 `# sshpass 密码: ...` 注释，则连接命令会变成：
 
