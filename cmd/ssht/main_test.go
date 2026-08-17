@@ -1,6 +1,8 @@
 package main
 
 import (
+	"os"
+	"os/exec"
 	"strings"
 	"testing"
 
@@ -151,6 +153,59 @@ func TestParseOptionsAcceptsDoctorSubcommand(t *testing.T) {
 	if options.ConfigPath != "/tmp/config" {
 		t.Fatalf("ConfigPath = %q, want /tmp/config", options.ConfigPath)
 	}
+}
+
+func TestParseOptionsAcceptsVersion(t *testing.T) {
+	t.Setenv("SSHT_TERMINAL", "invalid")
+	t.Setenv("SSHT_OPEN_MODE", "invalid")
+
+	options, err := parseOptions([]string{"--version"})
+	if err != nil {
+		t.Fatalf("parseOptions returned error: %v", err)
+	}
+	if !options.ShowVersion {
+		t.Fatal("ShowVersion = false, want true")
+	}
+}
+
+func TestVersionLine(t *testing.T) {
+	previous := version
+	version = "v1.2.3"
+	t.Cleanup(func() {
+		version = previous
+	})
+
+	if got := versionLine(); got != "ssht v1.2.3\n" {
+		t.Fatalf("versionLine() = %q, want %q", got, "ssht v1.2.3\n")
+	}
+}
+
+func TestVersionFlagExitsBeforeReadingConfig(t *testing.T) {
+	cmd := exec.Command(os.Args[0], "-test.run=TestVersionFlagHelperProcess")
+	cmd.Env = append(os.Environ(),
+		"SSHT_VERSION_HELPER=1",
+		"SSHT_VERSION_MISSING_CONFIG="+t.TempDir()+"/missing",
+		"SSHT_TERMINAL=invalid",
+		"SSHT_OPEN_MODE=invalid",
+	)
+
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("ssht --version failed: %v\n%s", err, output)
+	}
+	if got := string(output); got != "ssht dev\n" {
+		t.Fatalf("output = %q, want %q", got, "ssht dev\n")
+	}
+}
+
+func TestVersionFlagHelperProcess(t *testing.T) {
+	if os.Getenv("SSHT_VERSION_HELPER") != "1" {
+		return
+	}
+
+	os.Args = []string{"ssht", "--config", os.Getenv("SSHT_VERSION_MISSING_CONFIG"), "--version"}
+	main()
+	os.Exit(0)
 }
 
 func TestEnableTUIColorProfileForcesTrueColor(t *testing.T) {

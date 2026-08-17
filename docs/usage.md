@@ -28,6 +28,7 @@ SSHT_REPO=Davied-H/ssht
 
 ```bash
 ssht
+ssht --version
 ssht --config ~/.ssh/config
 ssht --no-include
 ssht --debug
@@ -41,6 +42,7 @@ ssht --monitor
 ssht --connect prod-api-01
 ```
 
+- `--version`：输出当前版本并退出。
 - `--print-hosts`：以 JSON 输出发现的主机。
 - `--doctor` / `ssht doctor`：检查 SSH config 健康状况并退出。
 - `--connect <alias>`：跳过 TUI，直接打开指定 Host。

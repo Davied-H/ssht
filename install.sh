@@ -57,10 +57,12 @@ trap 'rm -rf "$TMP_DIR"' EXIT INT TERM
 
 mkdir -p "$INSTALL_DIR"
 
+BUILD_VERSION=$(git -C "$SCRIPT_DIR" describe --tags --always --dirty 2>/dev/null || printf '%s' dev)
+
 echo "Building $BIN_NAME..."
 (
   cd "$SCRIPT_DIR"
-  go build -trimpath -ldflags="-s -w" -o "$TMP_DIR/$BIN_NAME" ./cmd/ssht
+  go build -trimpath -ldflags="-s -w -X main.version=$BUILD_VERSION" -o "$TMP_DIR/$BIN_NAME" ./cmd/ssht
 )
 
 install -m 0755 "$TMP_DIR/$BIN_NAME" "$INSTALL_DIR/$BIN_NAME"

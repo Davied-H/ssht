@@ -149,6 +149,15 @@ EOF
   if ! grep -Fq 'ssht_${VERSION}_${GOOS}_${GOARCH}.zip' "$workflow"; then
     fail "release workflow zip archive pattern changed"
   fi
+  if ! grep -Fq -- '-X main.version=${VERSION}' "$workflow"; then
+    fail "release workflow does not inject the release version into the binary"
+  fi
+  if ! grep -Fq 'DISPATCH_VERSION: ${{ inputs.version }}' "$workflow"; then
+    fail "release workflow does not pass manual versions through the environment"
+  fi
+  if ! grep -Fq 'Invalid release version' "$workflow"; then
+    fail "release workflow does not validate release versions"
+  fi
   if ! grep -Fq 'ssht_${VERSION}_${goos}_${goarch}.tar.gz' "$installer"; then
     fail "install-release.sh does not resolve versioned tar.gz asset names"
   fi

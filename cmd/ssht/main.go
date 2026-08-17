@@ -22,11 +22,14 @@ import (
 	"github.com/dong/ssht/internal/terminal"
 )
 
+var version = "dev"
+
 type options struct {
 	ConfigPath      string
 	NoInclude       bool
 	PrintHosts      bool
 	Doctor          bool
+	ShowVersion     bool
 	ConnectHost     string
 	Debug           bool
 	Terminal        string
@@ -41,6 +44,11 @@ func main() {
 	options, err := parseOptions(os.Args[1:])
 	if err != nil {
 		exitErr(err)
+	}
+
+	if options.ShowVersion {
+		fmt.Print(versionLine())
+		return
 	}
 
 	load := func() ([]sshconfig.HostEntry, []sshconfig.Warning, error) {
@@ -155,6 +163,7 @@ func parseOptions(args []string) (options, error) {
 	flags.BoolVar(&opts.NoInclude, "no-include", false, "disable Include parsing")
 	flags.BoolVar(&opts.PrintHosts, "print-hosts", false, "print discovered hosts as JSON")
 	flags.BoolVar(&opts.Doctor, "doctor", opts.Doctor, "run SSH config health checks and exit")
+	flags.BoolVar(&opts.ShowVersion, "version", false, "print version and exit")
 	flags.StringVar(&opts.ConnectHost, "connect", "", "open an SSH connection for the given Host alias without starting the TUI")
 	flags.BoolVar(&opts.Debug, "debug", false, "print parser warnings to stderr")
 	flags.StringVar(&opts.Terminal, "terminal", opts.Terminal, "terminal backend: auto, iterm, terminal, wezterm, kitty, alacritty, ghostty, warp")
@@ -164,6 +173,9 @@ func parseOptions(args []string) (options, error) {
 	flags.DurationVar(&opts.MonitorTimeout, "monitor-timeout", opts.MonitorTimeout, "hard timeout for one monitor SSH probe")
 	if err := flags.Parse(args); err != nil {
 		return options{}, err
+	}
+	if opts.ShowVersion {
+		return opts, nil
 	}
 	flags.Visit(func(flag *flag.Flag) {
 		if flag.Name == "monitor" {
@@ -185,6 +197,10 @@ func parseOptions(args []string) (options, error) {
 		return options{}, errors.New("unsupported open mode " + opts.OpenMode + "; supported modes: auto, window, tab, split")
 	}
 	return opts, nil
+}
+
+func versionLine() string {
+	return fmt.Sprintf("ssht %s\n", version)
 }
 
 func connectHost(alias string, entries []sshconfig.HostEntry, opts options) error {

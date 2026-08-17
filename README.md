@@ -46,6 +46,7 @@ cd ssht
 
 ```bash
 ssht
+ssht --version
 ssht --config ~/.ssh/config
 ssht --print-hosts
 ssht doctor
